@@ -1,0 +1,20 @@
+{
+  "name": "Account Register",
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "/_matrix/identity/v2/lookup"
+  },
+  "response": {
+    "status": 200,
+    "jsonBody": {
+      "mappings": {
+        "fDhYySIhDDg92FpP6MgAKKs2oaKVJNGYkoKZ38Uy-pI": "@user1-tchapgouv.com:tchapgouv.com"
+      }
+    },
+    "headers": {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*"
+    }
+  },
+  "priority": 100
+}

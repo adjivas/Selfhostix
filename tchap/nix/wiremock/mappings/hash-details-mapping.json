@@ -1,0 +1,19 @@
+{
+  "name": "Hash Details",
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/_matrix/identity/v2/hash_details"
+  },
+  "response": {
+    "status": 200,
+    "jsonBody": {
+      "algorithms": ["sha256", "none"], 
+      "lookup_pepper": "Qe8II"
+    },
+    "headers": {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*"
+    }
+  },
+  "priority": 100
+}

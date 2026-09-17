@@ -1,0 +1,340 @@
+"""
+Tests for items API endpoint in drive's core app: list
+"""
+
+from datetime import timedelta
+from unittest import mock
+
+from django.utils import timezone
+
+import pytest
+from faker import Faker
+from rest_framework.pagination import PageNumberPagination
+from rest_framework.test import APIClient
+
+from core import factories, models
+
+fake = Faker()
+pytestmark = pytest.mark.django_db
+
+
+@pytest.mark.parametrize("role", models.LinkRoleChoices.values)
+@pytest.mark.parametrize("reach", models.LinkReachChoices.values)
+def test_api_items_trashbin_anonymous(reach, role):
+    """
+    Anonymous users should not be allowed to list items from the trashbin
+    whatever the link reach and link role
+    """
+    factories.ItemFactory(link_reach=reach, link_role=role, deleted_at=timezone.now())
+
+    response = APIClient().get("/api/v1.0/items/trashbin/")
+
+    assert response.status_code == 401
+
+
+def test_api_items_trashbin_format(settings):
+    """Validate the format of items as returned by the trashbin view."""
+    settings.TRASHBIN_CUTOFF_DAYS = 30
+
+    user = factories.UserFactory()
+    client = APIClient()
+    client.force_login(user)
+    now = timezone.now()
+    other_users = factories.UserFactory.create_batch(3)
+    item = factories.ItemFactory(
+        deleted_at=now,
+        users=factories.UserFactory.create_batch(2),
+        favorited_by=[user, *other_users],
+        link_traces=other_users,
+        update_upload_state=models.ItemUploadStateChoices.READY,
+    )
+    factories.UserItemAccessFactory(item=item, user=user, role="owner")
+
+    response = client.get("/api/v1.0/items/trashbin/")
+
+    assert response.status_code == 200
+
+    content = response.json()
+    results = content.pop("results")
+    assert content == {
+        "count": 1,
+        "next": None,
+        "previous": None,
+    }
+    assert len(results) == 1
+    assert results[0] == {
+        "id": str(item.id),
+        "abilities": item.get_abilities(user),
+        "ancestors_link_reach": item.ancestors_link_reach,
+        "ancestors_link_role": item.ancestors_link_role,
+        "computed_link_reach": item.computed_link_reach,
+        "computed_link_role": item.computed_link_role,
+        "created_at": item.created_at.isoformat().replace("+00:00", "Z"),
+        "deleted_at": item.deleted_at.isoformat().replace("+00:00", "Z"),
+        "creator": {
+            "id": str(item.creator.id),
+            "full_name": item.creator.full_name,
+            "short_name": item.creator.short_name,
+        },
+        "depth": 1,
+        "link_reach": item.link_reach,
+        "link_role": item.link_role,
+        "nb_accesses": 3,
+        "numchild": 0,
+        "numchild_folder": 0,
+        "path": str(item.path),
+        "title": item.title,
+        "updated_at": item.updated_at.isoformat().replace("+00:00", "Z"),
+        "user_role": "owner",
+        "type": item.type,
+        "upload_state": models.ItemUploadStateChoices.READY
+        if item.type == models.ItemTypeChoices.FILE
+        else None,
+        "url": f"http://localhost:8083/media/item/{item.id!s}/{item.filename}"
+        if item.type == models.ItemTypeChoices.FILE
+        else None,
+        "url_permalink": f"http://testserver/api/v1.0/items/{item.id!s}/download/"
+        if item.type == models.ItemTypeChoices.FILE
+        else None,
+        "url_preview": None,
+        "mimetype": None,
+        "main_workspace": False,
+        "filename": item.filename,
+        "size": None,
+        "description": None,
+        "hard_delete_at": ((now + timedelta(days=30)).isoformat()),
+        "is_restricted": False,
+        "target": None,
+        "is_wopi_supported": False,
+    }
+
+
+def test_api_items_trashbin_authenticated_direct(django_assert_num_queries):
+    """
+    The trashbin should only list deleted items for which the current user is owner.
+    """
+    now = timezone.now()
+    user = factories.UserFactory()
+    client = APIClient()
+    client.force_login(user)
+
+    item1, item2 = factories.ItemFactory.create_batch(
+        2, deleted_at=now, type=models.ItemTypeChoices.FOLDER
+    )
+    models.ItemAccess.objects.create(item=item1, user=user, role="owner")
+    models.ItemAccess.objects.create(item=item2, user=user, role="owner")
+
+    # Unrelated items
+    for reach in models.LinkReachChoices:
+        for role in models.LinkRoleChoices:
+            factories.ItemFactory(link_reach=reach, link_role=role, deleted_at=now)
+
+    # Role other than "owner"
+    for role in models.RoleChoices.values:
+        if role == "owner":
+            continue
+        item_not_owner = factories.ItemFactory(deleted_at=now)
+        models.ItemAccess.objects.create(item=item_not_owner, user=user, role=role)
+
+    # Nested items should also get listed
+    parent = factories.ItemFactory(parent=item1, type=models.ItemTypeChoices.FOLDER)
+    item3 = factories.ItemFactory(
+        parent=parent,
+        deleted_at=now,
+        type=models.ItemTypeChoices.FILE,
+        update_upload_state=models.ItemUploadStateChoices.READY,
+    )
+    models.ItemAccess.objects.create(item=parent, user=user, role="owner")
+
+    # Permanently deleted items should not be listed
+    fourty_days_ago = timezone.now() - timedelta(days=40)
+    permanently_deleted_item = factories.ItemFactory(users=[(user, "owner")])
+    with mock.patch("django.utils.timezone.now", return_value=fourty_days_ago):
+        permanently_deleted_item.soft_delete()
+
+    expected_ids = {str(item1.id), str(item2.id), str(item3.id)}
+
+    with django_assert_num_queries(7):
+        response = client.get("/api/v1.0/items/trashbin/")
+
+    with django_assert_num_queries(4):
+        response = client.get("/api/v1.0/items/trashbin/")
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    results_ids = {result["id"] for result in results}
+    assert len(results) == 3
+    assert expected_ids == results_ids
+
+
+def test_api_items_trashbin_list_filter_type():
+    """
+    The trashbin should only list deleted items for which the current user is owner.
+    """
+    now = timezone.now()
+    user = factories.UserFactory()
+    client = APIClient()
+    client.force_login(user)
+
+    item_folder = factories.ItemFactory(type=models.ItemTypeChoices.FOLDER, deleted_at=now)
+    factories.UserItemAccessFactory(item=item_folder, user=user, role="owner")
+
+    item_file = factories.ItemFactory(
+        type=models.ItemTypeChoices.FILE,
+        deleted_at=now,
+        update_upload_state=models.ItemUploadStateChoices.READY,
+    )
+    factories.UserItemAccessFactory(item=item_file, user=user, role="owner")
+
+    # No filtering, make sure the two items are present.
+    response = client.get(
+        "/api/v1.0/items/trashbin/",
+    )
+    assert response.status_code == 200
+
+    results = response.json()["results"]
+    results_ids = {result["id"] for result in results}
+    assert len(results) == 2
+    assert results_ids == {str(item_folder.id), str(item_file.id)}
+
+    # Filter by type: folder
+    response = client.get(
+        "/api/v1.0/items/trashbin/?type=folder",
+    )
+    assert response.status_code == 200
+    results = response.json()["results"]
+    results_ids = {result["id"] for result in results}
+    assert len(results) == 1
+    assert results_ids == {str(item_folder.id)}
+
+    # Filter by type: file
+    response = client.get(
+        "/api/v1.0/items/trashbin/?type=file",
+    )
+    assert response.status_code == 200
+    results = response.json()["results"]
+    results_ids = {result["id"] for result in results}
+    assert len(results) == 1
+    assert results_ids == {str(item_file.id)}
+
+
+def test_api_items_trashbin_authenticated_via_team(django_assert_num_queries, mock_user_teams):
+    """
+    Authenticated users should be able to list trashbin items they own via a team.
+    """
+    now = timezone.now()
+    user = factories.UserFactory()
+
+    client = APIClient()
+    client.force_login(user)
+
+    mock_user_teams.return_value = ["team1", "team2", "unknown"]
+
+    deleted_item_team1 = factories.ItemFactory(
+        teams=[("team1", "owner")],
+        deleted_at=now,
+        type=models.ItemTypeChoices.FILE,
+        update_upload_state=models.ItemUploadStateChoices.READY,
+    )
+    factories.ItemFactory(teams=[("team1", "owner")])
+    factories.ItemFactory(teams=[("team1", "administrator")], deleted_at=now)
+    factories.ItemFactory(teams=[("team1", "administrator")])
+    deleted_item_team2 = factories.ItemFactory(
+        teams=[("team2", "owner")],
+        deleted_at=now,
+        type=models.ItemTypeChoices.FILE,
+        update_upload_state=models.ItemUploadStateChoices.READY,
+    )
+    factories.ItemFactory(teams=[("team2", "owner")])
+    factories.ItemFactory(teams=[("team2", "administrator")], deleted_at=now)
+    factories.ItemFactory(teams=[("team2", "administrator")])
+
+    expected_ids = {str(deleted_item_team1.id), str(deleted_item_team2.id)}
+
+    with django_assert_num_queries(5):
+        response = client.get("/api/v1.0/items/trashbin/")
+
+    with django_assert_num_queries(3):
+        response = client.get("/api/v1.0/items/trashbin/")
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert len(results) == 2
+    results_id = {result["id"] for result in results}
+    assert expected_ids == results_id
+
+
+@mock.patch.object(PageNumberPagination, "get_page_size", return_value=2)
+def test_api_items_trashbin_pagination(
+    _mock_page_size,
+):
+    """Pagination should work as expected."""
+    user = factories.UserFactory()
+
+    client = APIClient()
+    client.force_login(user)
+
+    item_ids = [
+        str(item.id)
+        for item in factories.ItemFactory.create_batch(
+            3,
+            deleted_at=timezone.now(),
+            update_upload_state=models.ItemUploadStateChoices.READY,
+        )
+    ]
+    for item_id in item_ids:
+        models.ItemAccess.objects.create(item_id=item_id, user=user, role="owner")
+
+    # Get page 1
+    response = client.get("/api/v1.0/items/trashbin/")
+
+    assert response.status_code == 200
+    content = response.json()
+
+    assert content["count"] == 3
+    assert content["next"] == "http://testserver/api/v1.0/items/trashbin/?page=2"
+    assert content["previous"] is None
+
+    assert len(content["results"]) == 2
+    for item in content["results"]:
+        item_ids.remove(item["id"])
+
+    # Get page 2
+    response = client.get(
+        "/api/v1.0/items/trashbin/?page=2",
+    )
+
+    assert response.status_code == 200
+    content = response.json()
+
+    assert content["count"] == 3
+    assert content["next"] is None
+    assert content["previous"] == "http://testserver/api/v1.0/items/trashbin/"
+
+    assert len(content["results"]) == 1
+    item_ids.remove(content["results"][0]["id"])
+    assert item_ids == []
+
+
+def test_api_items_trashbin_distinct():
+    """A item with several related users should only be listed once."""
+    user = factories.UserFactory()
+
+    client = APIClient()
+    client.force_login(user)
+
+    other_user = factories.UserFactory()
+    item = factories.ItemFactory(
+        users=[(user, "owner"), other_user],
+        deleted_at=timezone.now(),
+        update_upload_state=models.ItemUploadStateChoices.READY,
+    )
+
+    response = client.get(
+        "/api/v1.0/items/trashbin/",
+    )
+
+    assert response.status_code == 200
+    content = response.json()
+    assert len(content["results"]) == 1
+    assert content["results"][0]["id"] == str(item.id)

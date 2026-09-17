@@ -1,0 +1,311 @@
+#!/usr/bin/env python3
+
+# Run a command under gvisor, setting environment variables and sharing certain
+# directories in read only mode.  Specialized for running python, and (for testing)
+# bash.  Does not change directory structure, for unprivileged operation.
+
+# Contains plenty of hard-coded paths that assume we are running within
+# a container.
+
+import argparse
+import glob
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import shutil
+
+# Separate arguments before and after a -- divider.
+from itertools import groupby
+all_args = sys.argv[1:]
+all_args = [list(group) for k, group in groupby(all_args, lambda x: x == "--") if not k]
+main_args = all_args[0]   # args before the -- divider, for this script.
+more_args = all_args[1] if len(all_args) > 1 else []    # args after the -- divider
+                                                        # to pass on to python/bash.
+
+# Set up options.
+parser = argparse.ArgumentParser(description='Run something in gvisor (runsc).')
+parser.add_argument('command', choices=['bash', 'python3'])
+parser.add_argument('--dry-run', '-d', action='store_true',
+                    help="print config")
+parser.add_argument('--env', '-E', action='append')
+parser.add_argument('--mount', '-m', action='append')
+parser.add_argument('--restore', '-r')
+parser.add_argument('--checkpoint', '-c')
+parser.add_argument('--start', '-s')  # allow overridding the entrypoint
+parser.add_argument('--faketime')
+
+# If CHECK_FOR_TERMINAL is set, just determine whether we will be running bash, and
+# exit with success if so.  This is so if we are being wrapped in docker, it can be
+# started in interactive mode.
+if os.environ.get('CHECK_FOR_TERMINAL') == '1':
+  args = parser.parse_args(main_args)
+  exit(0 if args.command == 'bash' else -1)
+
+args = parser.parse_args(main_args)
+
+sys.stderr.write('run.py: ' + ' '.join(sys.argv) + "\n")
+sys.stderr.flush()
+
+include_bash = args.command == 'bash'
+
+# Basic settings for gvisor's runsc.  This follows the standard OCI specification:
+#   https://github.com/opencontainers/runtime-spec/blob/master/config.md
+cmd_args = []
+tmpfs_mounts = []
+mounts = [             # These will be filled in more fully programmatically below.
+  {
+    "destination": "/proc",  # gvisor virtualizes /proc
+    "source": "/proc",
+    "type": "proc"
+  },
+  {
+    "destination": "/sys",  # gvisor virtualizes /sys
+    "source": "/sys",
+    "type": "sysfs",
+    "options": [
+      "nosuid",
+      "noexec",
+      "nodev",
+      "ro"
+    ]
+  }
+]
+binds = []
+preserved = set()
+env = [
+  "PATH=/usr/local/bin:/usr/bin:/bin",
+  "LD_LIBRARY_PATH=/usr/local/lib"      # Assumes python version in /usr/local
+] + (args.env or [])
+settings = {
+  "ociVersion": "1.0.0",
+  "process": {
+    "terminal": include_bash,
+    # Match current user id, for convenience with mounts. For some versions of
+    # gvisor, default behavior may be better - if you see "access denied" problems
+    # during imports, try commenting this section out. We could make imports work
+    # for any version of gvisor by setting mode when using tmp.dir to allow
+    # others to list directory contents.
+    "user": {
+      "uid": os.getuid(),
+      "gid": 0
+    },
+    "args": cmd_args,
+    "env": env,
+    "cwd": "/"
+  },
+  "root": {
+    "path": "/",        # The fork of gvisor we use shares paths with host.
+    "readonly": True    # Read-only access by default, and we will blank out most
+    # of the host with empty "tmpfs" mounts.
+  },
+  "hostname": "gristland",
+  "mounts": mounts,
+  "linux": {
+    "namespaces": [
+      {
+        "type": "pid"
+      },
+      {
+        "type": "network"
+      },
+      {
+        "type": "ipc"
+      },
+      {
+        "type": "uts"
+      },
+      {
+        "type": "mount"
+      }
+    ]
+  }
+}
+
+# Prevents fork bomb
+settings['process']['rlimits'] = [{
+  "type": "RLIMIT_NPROC",
+  "hard": int(os.environ.get('GVISOR_LIMIT_NPROC', '8')),
+  "soft": int(os.environ.get('GVISOR_LIMIT_NPROC', '8')),
+}]
+
+memory_limit = os.environ.get('GVISOR_LIMIT_MEMORY')
+if memory_limit:
+  settings['process']['rlimits'].append({
+    "type": "RLIMIT_AS",
+    "hard": int(memory_limit),
+    "soft": int(memory_limit)
+  })
+
+# Helper for preparing a mount.
+def preserve(*locations, short_failure=False):
+  for location in locations:
+    # Check the requested directory is visible on the host, and that there hasn't been a
+    # muddle.  For Grist, this could happen if a parent directory of a temporary import
+    # directory hasn't been made available to the container this code runs in, for example.
+    if not os.path.exists(location):
+      if short_failure:
+        raise Exception('cannot find: ' + location)
+      raise Exception('cannot find: ' + location + ' ' +
+                      '(if tmp path, make sure TMPDIR when running grist and GRIST_TMP line up)')
+    binds.append({
+      "destination": location,
+      "source": location,
+      "options": ["ro"],
+      "type": "bind"
+    })
+    preserved.add(location)
+
+# Prepare the file system - blank out everything that need not be shared.
+exceptions = ["/lib", "/lib64"]   # to be shared (read-only)
+exceptions += ["/proc", "/sys"]   # already virtualized
+
+# retain /bin and /usr/bin for utilities
+start = args.start
+if include_bash or start:
+  exceptions.append("/bin")
+
+preserve("/usr/bin")
+preserve("/usr/local/lib")
+
+# Support user-specific extra directories. This is handy if Python is
+# somewhere weird and there is a maze of soft links to get
+# through. And Python is so often somewhere weird.
+extra_dirs = os.environ.get('GVISOR_EXTRA_DIRS')
+if extra_dirs:
+  preserve(*extra_dirs.split(':'))
+
+# Do not attempt to include symlink directories, they are not supported
+# and will cause obscure failures. On debian bookworm /lib64 is a
+# symlink and we do not appear to need it, relative to debian buster
+# where it is a real directory.
+if os.path.exists('/lib64') and not os.path.islink('/lib64'):
+  preserve("/lib64")
+if os.path.exists('/usr/lib64'):
+  preserve("/usr/lib64")
+preserve("/usr/lib")
+
+# include python3 for bash and python3
+best_python_executable = None
+# We expect python3 in /usr/bin or /usr/local/bin.
+candidates = [
+  path
+  # Pick the most generic python if not matching python3.11.
+  # Sorry this is delicate because of restores, mounts, symlinks.
+  for pattern in ['python3.11', 'python3.10', 'python3.9', 'python3', 'python3*']
+  for root in ['/usr/local', '/usr']
+  for path in glob.glob(f'{root}/bin/{pattern}')
+  if os.path.exists(path)
+]
+if not candidates:
+  raise Exception('could not find python3')
+best_python_executable = os.path.realpath(candidates[0])
+
+# Set up any specific shares requested.
+if args.mount:
+  preserve(*args.mount)
+
+for directory in os.listdir('/'):
+  directory_realpath = os.path.realpath("/" + directory)
+  # Skip non-directory entries (e.g. /swapfile) since tmpfs can only overlay directories.
+  if not os.path.isdir(directory_realpath):
+    continue
+  if directory_realpath not in exceptions and directory_realpath not in preserved:
+    tmpfs_mounts.append({
+      # This places an empty directory at this destination.
+      # Follow any symlinks since otherwise there is an error.
+      "destination": directory_realpath,
+      "type": "tmpfs"
+    })
+  # To avoid duplicates due to usrmerge pattern symlinks
+  exceptions.append(directory_realpath)
+
+settings['mounts'] = sorted(tmpfs_mounts, key=lambda mount: mount["destination"]) + mounts + binds
+
+# Set up faketime inside the sandbox if requested.  Can't be set up outside the sandbox,
+# because gvisor is written in Go and doesn't use the standard library that faketime
+# tweaks.
+if args.faketime:
+  preserve('/usr/lib/x86_64-linux-gnu/faketime')
+  cmd_args.append('faketime')
+  cmd_args.append('-f')
+  cmd_args.append('2020-01-01 00:00:00' if args.faketime == 'default' else args.faketime)
+  preserve('/usr/bin/faketime')
+  preserve('/bin/date')
+
+# Pick and set an initial entry point (bash or python).
+if start:
+  cmd_args.append(start)
+else:
+  cmd_args.append('bash' if include_bash else best_python_executable)
+
+# Add any requested arguments for the program that will be run.
+cmd_args += more_args
+
+# Helper for assembling a runsc command.
+# Takes the directory to work in and a list of arguments to append.
+def make_command(root_dir, action):
+  flag_string = os.environ.get('GVISOR_FLAGS') or '-rootless'
+  flags = flag_string.split(' ')
+  command = ["runsc",
+             "-root", "/tmp/runsc",   # Place container information somewhere writable.
+            ] + flags + [
+             "-network",
+             "none"] + action + [
+             root_dir.replace('/', '_')]  # Derive an arbitrary container name.
+  return command
+
+# Either print the OCI spec (if --dry-run), or write it as config.json in a
+# temporary directory and pass it on to gvisor runsc.
+if args.dry_run:
+  print(json.dumps(settings, indent=2))
+  exit(0)
+
+with tempfile.TemporaryDirectory() as root:  # pylint: disable=no-member
+  config_filename = os.path.join(root, 'config.json')
+  with open(config_filename, 'w') as fout:
+    json.dump(settings, fout, indent=2)
+  if not args.checkpoint:
+    if args.restore:
+      command = make_command(root, ["restore", "--image-path=" + args.restore])
+      # Overwrite config.json with the one of the checkpoint
+      # Any change to the configuration (such as command-line arguments) would
+      # cause gvisor to reject the restore.
+      shutil.copy(os.path.join(args.restore, 'config.json'), config_filename)
+    else:
+      command = make_command(root, ["run"])
+    result = subprocess.run(command, cwd=root)  # pylint: disable=no-member
+    if result.returncode != 0:
+      raise Exception('gvisor runsc problem: ' + json.dumps(command))
+  else:
+    # We've been asked to make a checkpoint.
+    # Start up the sandbox, and wait for it to emit a message on stderr ('Ready').
+    command = make_command(root, ["run"])
+    process = subprocess.Popen(command, cwd=root, stderr=subprocess.PIPE)
+    text = process.stderr.readline().decode('utf-8')  # wait for ready
+    if 'Ready' in text:
+      sys.stderr.write('Ready message: ' + text)
+      sys.stderr.flush()
+    else:
+      # Something unexpected has happened, echo the full error and hang.
+      while True:
+        sys.stderr.write('Problem: ' + text)
+        sys.stderr.flush()
+        text = process.stderr.readline().decode('utf-8')
+    # Remove existing checkpoint if present.
+    if os.path.exists(args.checkpoint):
+      shutil.rmtree(args.checkpoint)
+    # Make the directory, so we will later have the right to delete the checkpoint if
+    # we wish to replace it. Otherwise there is a muddle around permissions.
+    os.makedirs(args.checkpoint, exist_ok=True)
+    # Go ahead and run the runsc checkpoint command.
+    # This is destructive, it will kill the sandbox we are checkpointing.
+    command = make_command(root, ["checkpoint", "--image-path=" + args.checkpoint])
+    result = subprocess.run(command, cwd=root)  # pylint: disable=no-member
+    if result.returncode != 0:
+      raise Exception('gvisor runsc checkpointing problem: ' + json.dumps(command))
+    # Save the configuration of the checkpoint for reuse when restoring.
+    checkpoint_config_json = os.path.join(args.checkpoint, 'config.json')
+    shutil.copy(config_filename, checkpoint_config_json)
+    # We are done!

@@ -1,0 +1,25 @@
+{
+  "sendAppPage": {
+    "Loading...": "Loading...",
+    "og-description": "A modern, open source spreadsheet that goes beyond the grid",
+    "og-title": "Grist, the evolution of spreadsheets"
+  },
+  "oidc": {
+    "emailNotVerifiedError": "Please verify your email with the identity provider, and log in again."
+  },
+  "access": {
+    "docDisabled": "This document is disabled.",
+    "docNoAccess": "You do not have access to this document.",
+    "userDisabled": "User is disabled (Reason: {{- reason }})",
+    "userDisabledReasonMissing": "No reason provided"
+  },
+  "admin": {
+    "emptyOrg": "No owners found in the admin organization defined by `GRIST_INSTALL_ADMIN_ORG={{org}}`",
+    "orgUser": "User is an owner of the admin organization defined by `GRIST_INSTALL_ADMIN_ORG={{org}}`",
+    "noAdminEmail": "Missing admin account because `GRIST_ADMIN_EMAIL` and `GRIST_DEFAULT_EMAIL` are not set",
+    "accountByEmail": "Admin account defined by `GRIST_DEFAULT_EMAIL={{defaultEmail}}`"
+  },
+  "DocApi": {
+    "UntitledDocument": "Untitled document"
+  }
+}

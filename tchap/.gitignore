@@ -1,0 +1,56 @@
+/build
+/cert.pem
+/dist
+/key.pem
+/lib
+node_modules
+/.npmrc
+/*.log
+package-lock.json
+.DS_Store
+**/.idea
+/webpack-stats.json
+/.tmp
+.vscode
+.vscode/
+.env
+.env.*
+coverage
+/index.html
+
+/cypress/videos
+/cypress/downloads
+/cypress/screenshots
+/cypress/synapselogs
+# These could have files in them but don't currently
+# Cypress will still auto-create them though...
+/cypress/performance
+
+# File from translations checkin scripts.
+modules/tchap-translations/tmp/*
+# version file and tarball created by `npm pack` / `yarn pack`
+/git-revision.txt
+jest-sonar.xml
+
+*storybook.log
+storybook-static
+
+/packages/shared-components/node_modules
+# :TCHAP: scalingo has difficulties building SC, so we include the dist folder
+# /packages/shared-components/dist
+/packages/shared-components/src/i18nKeys.d.ts
+/packages/shared-components/.vitest-attachments
+
+# TSC incremental compilation information
+*.tsbuildinfo
+
+/.link-config
+
+.nx/cache
+.nx/workspace-data
+
+.pnpm-store
+
+# vitepress
+/docs/.vitepress/dist
+/docs/.vitepress/cache

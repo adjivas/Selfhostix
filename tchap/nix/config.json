@@ -1,0 +1,26 @@
+{
+  "default_server_config": {
+    "m.homeserver": {
+      "base_url": "http://192.168.77.51:8008",
+      "server_name": "tchap"
+    }
+  },
+  "homeserver_list": [
+    {
+      "base_url": "http://192.168.77.51:8008",
+      "server_name": "tchap"
+    }
+  ],
+  "disable_custom_urls": false,
+  "disable_guests": true,
+  "brand": "Tchap",
+  "default_country_code": "FR",
+  "default_theme": "light",
+  "default_federate": false,
+  "show_labs_settings": false,
+  "branding": {
+    "auth_header_logo_url": "themes/tchap/img/logos/tchap-logo.svg",
+    "welcome_background_url": "themes/tchap/img/backgrounds/tchap-bg.jpg"
+  },
+  "logout_redirect_url": "#/welcome"
+}

@@ -1,0 +1,21 @@
+{
+  "ACUserManager": {
+    "Invite new member": "Nieuw lid uitnodigen",
+    "We'll email an invite to {{email}}": "We sturen een uitnodiging naar {{email}}",
+    "Enter email address": "E-mailadres ingeven"
+  },
+  "AccessRules": {
+    "Add column rule": "Kolomregel toevoegen",
+    "Add table rules": "Tabelregels toevoegen",
+    "Add user attributes": "Voeg gebruikerskenmerken toe",
+    "Add Default Rule": "Standaardregel Toevoegen"
+  },
+  "RightPanelUtils": {
+    "series_one": "Serie",
+    "series_other": "Serie",
+    "columns_one": "Kolommen",
+    "columns_other": "Kolommen",
+    "fields_one": "Velden",
+    "fields_other": "Velden"
+  }
+}

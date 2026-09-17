@@ -1,0 +1,554 @@
+@use "sass:map";
+@use "@/styles/cunningham-tokens-sass" as *;
+
+$tablet: map.get($themes, "default", "globals", "breakpoints", "tablet");
+$xl: map.get($themes, "default", "globals", "breakpoints", "xl");
+
+/**
+ * Mixin to apply border and background to a row of a datagrid.
+ * We need this complicated thing because we cannot apply background-color +
+ * border-radius + overflow: hidden on a tr, the background goes out of the border.
+ */
+@mixin row-border-background($border-color, $background-color) {
+  td {
+    background-color: $background-color;
+    border-top: 1px solid $border-color;
+    border-bottom: 1px solid $border-color;
+  }
+
+  td:first-child {
+    border-top-left-radius: 4px;
+    border-bottom-left-radius: 4px;
+    border-left: 1px solid $border-color;
+  }
+
+  td:nth-child(2) {
+    border-top-left-radius: 4px;
+    border-bottom-left-radius: 4px;
+    border-left: 1px solid $border-color;
+  }
+
+  td:last-child {
+    border-top-right-radius: 4px;
+    border-bottom-right-radius: 4px;
+    border-right: 1px solid $border-color;
+  }
+}
+
+.embedded-explorer {
+  display: flex;
+  flex-direction: column;
+
+  @media (min-width: $tablet) {
+    height: 300px;
+  }
+
+  &--with-search {
+    .embedded-explorer__container {
+      padding-top: var(--c--globals--spacings--xs);
+    }
+  }
+
+  &__container {
+    display: flex;
+    flex-direction: column;
+    gap: var(--c--globals--spacings--xs);
+    flex: 1;
+  }
+
+  &__search {
+    width: 100%;
+    margin-bottom: var(--c--globals--spacings--xs);
+
+    &__container {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: var(--c--globals--spacings--xs);
+      padding: calc(
+          var(--c--globals--spacings--base) + var(--c--globals--spacings--xxs)
+        )
+        calc(var(--c--globals--spacings--sm) + var(--c--globals--spacings--xs));
+
+      border-bottom: 1px solid var(--c--contextuals--border--surface--primary);
+
+      &__icon {
+        display: flex;
+        align-items: center;
+      }
+
+      .material-icons {
+        color: var(--c--contextuals--content--semantic--neutral--secondary);
+      }
+
+      input {
+        flex: 1;
+        border: none;
+        outline: none;
+        background: transparent;
+        color: var(--c--contextuals--content--semantic--neutral--primary);
+        font-family: var(--c--globals--font--families--base);
+        font-size: 16px;
+
+        &::placeholder {
+          font-family: var(--c--globals--font--families--base);
+          color: var(--c--contextuals--content--semantic--neutral--tertiary);
+          font-size: 16px;
+          font-weight: 400;
+        }
+      }
+    }
+  }
+
+  &__breadcrumbs {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 0px;
+
+    &__last-item {
+      display: flex;
+      align-items: center;
+      gap: var(--c--globals--spacings--2xs);
+    }
+  }
+
+  &__empty {
+    color: var(--c--contextuals--content--semantic--neutral--secondary);
+    font-weight: var(--c--globals--font--weights--regular);
+    font-size: var(--c--globals--font--sizes--md);
+  }
+
+  &--compact {
+    td:has(.explorer__grid__item__name) {
+      padding-left: var(--c--globals--spacings--2xs);
+    }
+
+    .c__datagrid__row__cell--actions {
+      .droppable {
+        justify-content: flex-start;
+      }
+    }
+
+    .explorer__grid {
+      flex-grow: 1;
+    }
+
+    .c__datagrid {
+      min-height: auto;
+    }
+  }
+}
+
+.explorer__grid {
+  &__item {
+    &__mobile {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      height: 46px;
+
+      &__info {
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+
+        &__title {
+          display: flex;
+          overflow: hidden;
+        }
+
+        span {
+          padding: 0;
+          line-height: 18px;
+          font-weight: 500;
+        }
+
+        &__meta {
+          font-size: 12px;
+          color: var(--c--contextuals--content--semantic--neutral--secondary);
+        }
+      }
+    }
+
+    &__name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      text-decoration: none;
+      color: red;
+
+      .c__tooltip {
+        max-width: 100%;
+      }
+
+      > img {
+        // Need to set width and height to prevent layout shift
+        // and to make overflow calculations work correctly before
+        // the image is loaded
+        width: 32px;
+        height: 32px;
+      }
+
+      &__text {
+        padding: 8px 0px; // To have a margin of error when doing drag and drop
+        font-size: 14px;
+        font-weight: 400;
+        color: var(--c--contextuals--content--semantic--neutral--primary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      &--duplicating-text {
+        color: var(--c--contextuals--content--semantic--neutral--tertiary);
+      }
+
+      &__duplicating-label {
+        color: var(--c--contextuals--content--semantic--neutral--tertiary);
+        font-style: italic;
+      }
+
+      &__spinner-container {
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      &__title-wrapper {
+        display: flex;
+        overflow: hidden;
+      }
+
+      &--duplicating {
+        pointer-events: none;
+      }
+    }
+
+    &__actions {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+    }
+
+    &__cell-value {
+      font-size: 12px;
+      font-weight: 400;
+      color: var(--c--contextuals--content--semantic--neutral--secondary);
+    }
+  }
+
+  &.c__datagrid--empty {
+    min-height: 200px;
+    padding-bottom: 40px;
+    border: none;
+
+    &-placeholder {
+      gap: 0px !important;
+    }
+  }
+
+  .c__datagrid__row__cell--actions {
+    .droppable {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+    }
+  }
+
+  &.c__datagrid--loading {
+    position: relative;
+  }
+
+  &__loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(255, 255, 255, 0.7);
+    display: flex;
+    justify-content: center;
+    padding-top: 100px;
+    z-index: 1;
+  }
+
+  .c__datagrid__empty-placeholder {
+    width: min(400px, 80%);
+    gap: 0px !important;
+    img {
+      border: none;
+    }
+  }
+
+  &__empty {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    &__caption {
+      font-size: 14px;
+      color: var(--c--contextuals--content--semantic--neutral--primary);
+      font-weight: 700;
+    }
+    &__cta {
+      font-size: 12px;
+      color: var(--c--contextuals--content--semantic--neutral--secondary);
+      font-weight: 400;
+    }
+  }
+
+  table {
+    border-collapse: separate;
+    border-spacing: 0 2px;
+
+    &:focus-within {
+      outline: none;
+    }
+
+    // mobile column.
+    th:nth-child(1) {
+      display: none;
+    }
+
+    tr td:first-child,
+    tr th:first-child {
+      padding-left: 6px;
+    }
+
+    tr td:last-child,
+    tr th:last-child {
+      padding-right: 6px;
+    }
+
+    tbody {
+      transition: background-color 0.3s ease;
+
+      // mobile column.
+      td:nth-child(1) {
+        display: none;
+      }
+
+      tr td:first-child {
+        border-top-left-radius: 4px;
+        border-bottom-left-radius: 4px;
+      }
+      tr td:last-child {
+        border-top-right-radius: 4px;
+        border-bottom-right-radius: 4px;
+      }
+
+      tr {
+        @include row-border-background(transparent, transparent);
+      }
+
+      tr:hover {
+        // Reset the default behavior from ui kit. We want to apply the style to the
+        // td, not the tr.
+        background-color: transparent;
+        @include row-border-background(
+          transparent,
+          var(--c--components--datagrid--body--background-color-hover)
+        );
+      }
+
+      tr.selected {
+        // box-shadow: inset 0 0 0 1px
+        //   var(--c--contextuals--border--semantic--brand--tertiary);
+        // border-radius: 4px;
+        @include row-border-background(
+          var(--c--contextuals--border--semantic--brand--tertiary),
+          var(--c--contextuals--background--semantic--brand--tertiary)
+        );
+      }
+
+      tr.over {
+        @include row-border-background(
+          var(--c--contextuals--border--semantic--brand--primary),
+          var(--c--contextuals--background--semantic--brand--tertiary)
+        );
+      }
+
+      tr.duplicating {
+        cursor: default;
+      }
+
+      tr {
+        cursor: default;
+        user-select: none;
+      }
+    }
+  }
+
+  // Header components
+  &__header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+
+    &__label {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: var(--c--contextuals--content--semantic--neutral--tertiary);
+    }
+
+    &__column-btn {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 4px;
+      font-size: inherit;
+      font-weight: inherit;
+      font-family: inherit;
+      color: inherit;
+
+      &:hover {
+        background-color: var(
+          --c--components--datagrid--body--background-color-hover
+        );
+      }
+    }
+
+    &__sort-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: none;
+      border: none;
+      cursor: pointer;
+      padding: 2px;
+      border-radius: 4px;
+      color: var(--c--contextuals--content--semantic--neutral--tertiary);
+
+      &:hover {
+        background-color: var(
+          --c--components--datagrid--body--background-color-hover
+        );
+      }
+
+      &--active {
+        color: var(--c--contextuals--content--semantic--brand--primary);
+      }
+    }
+  }
+
+  &__th--title {
+    width: 40%;
+  }
+
+  &__th--info-col-1,
+  &__th--info-col-2 {
+    width: 22%;
+    padding: 0 8px;
+
+    button {
+      margin-left: -12px;
+    }
+  }
+
+  &__th--actions {
+    width: 5%;
+  }
+
+  // Hide info-col-2 before tablet (at xl breakpoint)
+  &__th--info-col-2 {
+    @media (max-width: $xl) {
+      display: none;
+    }
+  }
+
+  table tbody td:nth-child(4) {
+    @media (max-width: $xl) {
+      display: none;
+    }
+  }
+
+  @media (max-width: $tablet) {
+    table {
+      tr td:first-child,
+      tr th:first-child {
+        padding-left: 0;
+      }
+
+      tr td:last-child,
+      tr th:last-child {
+        padding-right: 0;
+      }
+
+      thead {
+        // We can't just simply hide the columns because the table
+        // column will not size properly. We want the first column
+        // to grow to fill the space.
+        th {
+          height: 0;
+        }
+
+        th:nth-child(1) {
+          display: table-cell;
+        }
+
+        // Hide title, info-col-1, info-col-2 columns on mobile
+        th:nth-child(2),
+        th:nth-child(3),
+        th:nth-child(4) {
+          display: none;
+        }
+
+        // Actions column
+        th:nth-child(5) {
+          display: table-cell;
+          width: 40px;
+        }
+      }
+
+      tbody {
+        td:nth-child(1) {
+          display: table-cell;
+        }
+
+        // Hide title, info-col-1, info-col-2
+        td:nth-child(2),
+        td:nth-child(3),
+        td:nth-child(4) {
+          display: none;
+        }
+
+        // Actions column
+        td:nth-child(5) {
+          height: 48px;
+        }
+      }
+    }
+  }
+}
+
+.explorer__compact {
+  thead {
+    height: 0;
+    line-height: 0;
+
+    tr {
+      th {
+        height: 0;
+        line-height: 0;
+        div {
+          height: 0;
+          line-height: 0;
+        }
+      }
+    }
+  }
+}

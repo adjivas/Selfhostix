@@ -1,0 +1,108 @@
+import { useTranslation } from "react-i18next";
+import { useEffect, useRef, useState } from "react";
+import { Item, LinkReach } from "../drivers/types";
+import { Button, Spinner } from "@gouvfr-lasuite/ui-components";
+import { ClientMessageType, SDKRelayManager } from "./SdkRelayManager";
+import { useMutationUpdateLinkConfiguration } from "../explorer/hooks/useMutations";
+
+export const PickerFooter = ({
+  token,
+  selectedItems,
+}: {
+  token: string;
+  selectedItems: Item[];
+}) => {
+  const { t } = useTranslation();
+
+  const [waitForClosing, setWaitForClosing] = useState(false);
+  const hasSentItemsSelected = useRef(false);
+
+  const updateLinkConfiguration = useMutationUpdateLinkConfiguration();
+
+  const onChoose = async () => {
+    const promises = selectedItems.map((item) => {
+      if (item.link_reach === LinkReach.PUBLIC) {
+        return Promise.resolve();
+      }
+
+      return new Promise<void>((resolve, reject) => {
+        updateLinkConfiguration.mutate(
+          {
+            itemId: item.id,
+            link_reach: LinkReach.PUBLIC,
+            link_role: item.link_role,
+          },
+          {
+            onSuccess: () => {
+              resolve();
+            },
+            onError: (error) => {
+              reject(error);
+            },
+          },
+        );
+      });
+    });
+
+    await Promise.all(promises);
+
+    await SDKRelayManager.registerEvent(token, {
+      type: ClientMessageType.ITEMS_SELECTED,
+      data: {
+        items: selectedItems,
+      },
+    });
+    hasSentItemsSelected.current = true;
+    setWaitForClosing(true);
+    window.close();
+  };
+
+  const onCancel = async () => {
+    await SDKRelayManager.registerEvent(token, {
+      type: ClientMessageType.CANCEL,
+      data: {},
+    });
+    setWaitForClosing(true);
+    window.close();
+  };
+
+  useEffect(() => {
+    window.addEventListener("beforeunload", async function () {
+      // We don't want to send a cancel event if the user has already selected items.
+      if (hasSentItemsSelected.current) {
+        return;
+      }
+      await SDKRelayManager.registerEvent(token, {
+        type: ClientMessageType.CANCEL,
+        data: {},
+      });
+    });
+  }, []);
+
+  return (
+    <div className="sdk__explorer__footer">
+      <div className="sdk__explorer__footer__caption">
+        {t("sdk.explorer.picker_label", {
+          count: selectedItems.length,
+        })}
+      </div>
+      <div className="sdk__explorer__footer__actions">
+        <Button
+          variant="tertiary"
+          onClick={onCancel}
+          disabled={waitForClosing}
+          icon={waitForClosing ? <Spinner size="sm" /> : undefined}
+        >
+          {t("sdk.explorer.cancel")}
+        </Button>
+        <Button
+          onClick={onChoose}
+          disabled={waitForClosing || selectedItems.length === 0}
+          icon={waitForClosing ? <Spinner size="sm" /> : undefined}
+        >
+          {t("sdk.explorer.choose")}
+        </Button>
+      </div>
+    </div>
+  );
+};

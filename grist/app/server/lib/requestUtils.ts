@@ -1,0 +1,1020 @@
+import { ApiError } from "app/common/ApiError";
+import {
+  DEFAULT_HOME_SUBDOMAIN,
+  isOrgInPathOnly,
+  parseFirstUrlPart,
+  parseSubdomain,
+  sanitizePathTail,
+} from "app/common/gristUrls";
+import * as gutil from "app/common/gutil";
+import { removeTrailingSlash } from "app/common/gutil";
+import { SingleCell } from "app/common/TableData";
+import { DocScope, Scope } from "app/gen-server/lib/homedb/HomeDBManager";
+import { QueryResult } from "app/gen-server/lib/homedb/Interfaces";
+import { appSettings } from "app/server/lib/AppSettings";
+import { getTransitiveHeaders, getUserId, RequestWithLogin } from "app/server/lib/Authorizer";
+import { RequestWithOrg } from "app/server/lib/extractOrg";
+import { RequestWithGrist } from "app/server/lib/GristServer";
+import { getHomeUrl } from "app/server/lib/gristSettings";
+import log from "app/server/lib/log";
+import { LogMethods } from "app/server/lib/LogMethods";
+import { Permit } from "app/server/lib/Permit";
+
+import http, { IncomingMessage, ServerResponse } from "http";
+import https from "https";
+import * as net from "net";
+import { pipeline, Writable } from "stream";
+import { TLSSocket } from "tls";
+import { urlToHttpOptions } from "url";
+
+import { Request, Response } from "express";
+import mapKeys from "lodash/mapKeys";
+import memoize from "lodash/memoize";
+
+const shouldLogApiDetails = appSettings.section("log").flag("apiDetails").readBool({
+  envVar: ["GRIST_LOG_API_DETAILS", "GRIST_HOSTED_VERSION"],
+  preferredEnvVar: "GRIST_LOG_API_DETAILS",
+  defaultValue: false,
+});
+
+// Offset to https ports in dev/testing environment.
+export const TEST_HTTPS_OFFSET = process.env.GRIST_TEST_HTTPS_OFFSET ?
+  parseInt(process.env.GRIST_TEST_HTTPS_OFFSET, 10) : undefined;
+
+// Database fields that we permit in entities but don't want to cross the api.
+const INTERNAL_FIELDS = new Set([
+  "apiKey", "billingAccountId", "firstLoginAt", "lastConnectionAt", "filteredOut", "ownerId", "gracePeriodStart",
+  "stripeCustomerId", "stripeSubscriptionId", "stripeProductId", "userId", "isFirstTimeUser", "allowGoogleLogin",
+  "authSubject", "usage", "createdBy", "unsubscribeKey", "disabledReason",
+]);
+
+/**
+ * Adapt a home-server or doc-worker URL to match the hostname in the request URL. For custom
+ * domains and when GRIST_SERVE_SAME_ORIGIN is set, we replace the full hostname; otherwise just
+ * the base of the hostname. The changes to url are made in-place.
+ *
+ * For dev purposes, port is kept but possibly adjusted for TEST_HTTPS_OFFSET. Note that if port
+ * is different from req's port, it is not considered same-origin for CORS purposes, but would
+ * still receive cookies.
+ */
+export function adaptServerUrl(url: URL, req: RequestWithOrg): void {
+  const reqBaseDomain = parseSubdomain(req.hostname).base;
+
+  if (process.env.GRIST_SERVE_SAME_ORIGIN === "true" || req.isCustomHost) {
+    url.hostname = req.hostname;
+  } else if (reqBaseDomain) {
+    const subdomain: string | undefined = parseSubdomain(url.hostname).org || DEFAULT_HOME_SUBDOMAIN;
+    url.hostname = `${subdomain}${reqBaseDomain}`;
+  }
+
+  // In dev/test environment we can turn on a flag to adjust URLs to use https.
+  if (TEST_HTTPS_OFFSET && url.port && url.protocol === "http:") {
+    url.port = String(parseInt(url.port, 10) + TEST_HTTPS_OFFSET);
+    url.protocol = "https:";
+  }
+}
+
+/**
+ * If org is not encoded in domain, prefix it to path - otherwise leave path unchanged.
+ * The domain is extracted from the request, so this method is only useful for constructing
+ * urls that stay within that domain.
+ */
+export function addOrgToPathIfNeeded(req: RequestWithOrg, path: string): string {
+  return (isOrgInPathOnly(req.hostname) && req.org) ? `/o/${req.org}${path}` : path;
+}
+
+/**
+ * If org is known, prefix it to path unconditionally.
+ */
+export function addOrgToPath(req: RequestWithOrg, path: string): string {
+  return req.org ? `/o/${req.org}${path}` : path;
+}
+
+/**
+ * Get url to the org associated with the request.
+ */
+export function getOrgUrl(req: Request, path: string = "/") {
+  // Be careful to include a leading slash in path, to ensure we don't modify the origin or org.
+  return getOriginUrl(req) + addOrgToPathIfNeeded(req, sanitizePathTail(path));
+}
+
+/**
+ * Parse a request's origin header safely into a URL.
+ * Handles Opaque Origins (https://developer.mozilla.org/en-US/docs/Glossary/Origin#opaque_origin)
+ * and malformed URLs safely.
+ *
+ * Throws an ApiError if origin is invalid (not a valid URL or "null")
+ */
+export function parseOrigin(origin: string): { raw: string, url: URL } | "null" {
+  if (origin === "null") { return "null" as const; }
+  try {
+    return { raw: origin, url: new URL(origin) };
+  } catch {
+    throw new ApiError(`Invalid origin: ${origin}`, 400);
+  }
+}
+
+/**
+ * Returns true for requests from permitted origins.  For such requests, if
+ * a Response object is provided, an "Access-Control-Allow-Origin" header is added
+ * to the response.  Vary: Origin is also set to reflect the fact that the headers
+ * are a function of the origin, to prevent inappropriate caching on the browser's side.
+ */
+export function trustOrigin(req: IncomingMessage, resp?: Response): boolean {
+  // TODO: We may want to consider changing allowed origin values in the future.
+  // Note that the request origin is undefined for non-CORS requests.
+  if (!req.headers.origin) { return true; } // Not a CORS request
+  const origin = parseOrigin(req.headers.origin);
+  // Opaque origin: https://developer.mozilla.org/en-US/docs/Glossary/Origin#opaque_origin
+  if (origin === "null") { return false; }
+  if (!allowHost(req, origin.url)) { return false; }
+
+  if (resp) {
+    // For a request to a custom domain, the full hostname must match.
+    // Access-Control-Allow-Origin should match the Origin value exactly (https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Access-Control-Allow-Origin)
+    resp.header("Access-Control-Allow-Origin", origin.raw);
+    resp.header("Vary", "Origin");
+  }
+  return true;
+}
+
+// Returns whether req satisfies the given allowedHost. Unless req is to a custom domain, it is
+// enough if only the base domains match. Differing ports are allowed, which helps in dev/testing.
+export function allowHost(req: IncomingMessage, allowedHost: string | URL) {
+  const proto = getEndUserProtocol(req);
+  const actualUrl = new URL(getOriginUrl(req));
+  const allowedUrl = (typeof allowedHost === "string") ? new URL(`${proto}://${allowedHost}`) : allowedHost;
+  log.rawDebug("allowHost: ", {
+    req: (new URL(req.url!, `http://${req.headers.host}`).href),
+    origin: req.headers.origin,
+    actualUrl: actualUrl.hostname,
+    allowedUrl: allowedUrl.hostname,
+  });
+  if ((req as RequestWithOrg).isCustomHost) {
+    // For a request to a custom domain, the full hostname must match.
+    return actualUrl.hostname === allowedUrl.hostname;
+  } else {
+    // For requests to a native subdomains, only the base domain needs to match.
+    const allowedDomain = parseSubdomain(allowedUrl.hostname);
+    const actualDomain = parseSubdomain(actualUrl.hostname);
+    return actualDomain.base ?
+      actualDomain.base === allowedDomain.base :
+      actualUrl.hostname === allowedUrl.hostname;
+  }
+}
+
+export function matchesBaseDomain(domain: string, baseDomain: string) {
+  return domain === baseDomain || domain.endsWith("." + baseDomain);
+}
+
+export function isParameterOn(parameter: any): boolean {
+  return gutil.isAffirmative(parameter);
+}
+
+/**
+ * Get Scope from request, and make sure it has everything needed for a document.
+ */
+export function getDocScope(req: Request): DocScope {
+  const scope = getScope(req);
+  if (!scope.urlId) { throw new Error("document required"); }
+  return scope as DocScope;
+}
+
+/**
+ * Extract information included in the request that may restrict the scope of
+ * that request.  Not all requests will support all restrictions.
+ *
+ * - userId - Mandatory.  Produced by authentication middleware.
+ *     Information returned and actions taken will be limited by what
+ *     that user has access to.
+ *
+ * - org - Optional.  Extracted by middleware.  Limits
+ *     information/action to the given org.  Not every endpoint
+ *     respects this limit.  Possible exceptions include endpoints for
+ *     listing orgs a user has access to, and endpoints with an org id
+ *     encoded in them.
+ *
+ * - urlId - Optional.  Embedded as "did" (or "docId") path parameter in endpoints related
+ *     to documents.  Specifies which document the request pertains to.  Can
+ *     be a urlId or a docId.
+ *
+ * - includeSupport - Optional.  Embedded as "includeSupport" query parameter.
+ *     Just a few endpoints support this, it is a very specific "hack" for including
+ *     an example workspace in org listings.
+ *
+ * - showRemoved - Optional.  Embedded as "showRemoved" query parameter.
+ *     Supported by many endpoints.  When absent, request is limited
+ *     to docs/workspaces that have not been removed.  When present, request
+ *     is limited to docs/workspaces that have been removed.
+ */
+export function getScope(req: Request): Scope {
+  const { specialPermit, docAuth } = req as RequestWithLogin;
+  const urlId = req.params.did || req.params.docId || docAuth?.docId || undefined;
+  const userId = getUserId(req);
+  const org = (req as RequestWithOrg).org;
+  const includeSupport = isParameterOn(req.query.includeSupport);
+  const showRemoved = isParameterOn(req.query.showRemoved);
+  return addCredentialScope(
+    { urlId, userId, org, includeSupport, showRemoved, specialPermit },
+    req,
+  );
+}
+
+/**
+ * If scope is for the given userId, return a new Scope with the special permit added.
+ */
+export function addPermit(scope: Scope, userId: number, specialPermit: Permit): Scope {
+  return { ...scope, ...(scope.userId === userId ? { specialPermit } : {}) };
+}
+
+/**
+ * If the request carries an AuthCredential (e.g. an OAuth access token) that applies to the
+ * matched route, override the scope's userId with the credential's identified user and attach
+ * any resource filter it imposes. Otherwise return the scope unchanged.
+ *
+ * Credentialed requests are not expected to carry a non-anonymous userId; instead, they embed
+ * the userId of the user the credential is operating on behalf within the credential itself.
+ * (Example: The access token and OAuth branches in `resolveIdentity`, which both leave the
+ * user anonymous.)
+ *
+ * Note that such requests remain anonymous even if they could otherwise be identified using
+ * another authentication method (e.g. session cookies). This is done intentionally to avoid
+ * permitting access to resources that don't gate access with `getScope`, and otherwise aren't
+ * aware of credentials, which were introduced to Grist later than other authentication methods.
+ * If such requests were allowed to be non-anonymous, an endpoint that directly accesses
+ * `req.userId` could permit a credentialed request through, even if the credential alone
+ * would not permit access to the same endpoint.
+ */
+function addCredentialScope(scope: Scope, req: Request): Scope {
+  const contribution = (req as RequestWithLogin).authSession?.credential?.scope(req);
+  if (!contribution) { return scope; }
+  return { ...scope, userId: contribution.userId, filter: contribution.filter };
+}
+
+export interface SendReplyOptions {
+  allowedFields?: Set<string>;
+}
+
+// Return a JSON response reflecting the output of a query.
+// Filter out keys we don't want crossing the api.
+// Set req to null to not log any information about request.
+export async function sendReply<T>(
+  req: Request | null,
+  res: Response,
+  result: QueryResult<T>,
+  options: SendReplyOptions = {},
+) {
+  const data = pruneAPIResult(result.data, options.allowedFields);
+  if (shouldLogApiDetails && req) {
+    const mreq = req as RequestWithLogin;
+    const docId = mreq.docAuth?.docId;
+    log.rawDebug("api call", {
+      url: req.url,
+      userId: mreq.userId,
+      altSessionId: mreq.altSessionId,
+      email: mreq.user?.loginEmail,
+      org: mreq.org,
+      params: req.params,
+      ...(docId ? { docId } : {}),
+    });
+  }
+  res.status(result.status);
+  if (result.status >= 200 && result.status < 300) {
+    return res.json(data ?? null); // can't handle undefined
+  } else {
+    return res.json({ error: result.errMessage });
+  }
+}
+
+export async function sendOkReply<T>(
+  req: Request | null,
+  res: Response,
+  result?: T,
+  options: SendReplyOptions = {},
+) {
+  return sendReply(req, res, { status: 200, data: result }, options);
+}
+
+export function pruneAPIResult<T>(data: T, allowedFields?: Set<string>): T | undefined {
+  // TODO: This can be optimized by pruning data recursively without serializing in between. But
+  // it's fairly fast even with serializing (on the order of 15usec/kb).
+  const output = JSON.stringify(data,
+    (key: string, value: any) => {
+      // Do not include removedAt field if it is not set.  It is not relevant to regular
+      // situations where the user is working with non-deleted resources.
+      if (key === "removedAt" && value === null) { return undefined; }
+      // Same for disabledAt and disabledReason
+      if (key === "disabledAt" && value === null) { return undefined; }
+      if (key === "disabledReason" && value === null) { return undefined; }
+      // Don't bother sending option fields if there are no options set.
+      if (key === "options" && value === null) { return undefined; }
+      // Don't prune anything that is explicitly allowed.
+      if (allowedFields?.has(key)) { return value; }
+      // User connect id is not used in regular configuration, so we remove it from the response, when
+      // it's not filled.
+      if (key === "connectId" && value === null) { return undefined; }
+      return INTERNAL_FIELDS.has(key) ? undefined : value;
+    });
+  return output !== undefined ? JSON.parse(output) : undefined;
+}
+
+/**
+ * Access the canonical docId associated with the request.  Must have already authorized.
+ */
+export function getDocId(req: Request) {
+  const mreq = req as RequestWithLogin;
+  // We should always have authorized by now.
+  if (!mreq.docAuth?.docId) { throw new ApiError(`unknown document`, 500); }
+  return mreq.docAuth.docId;
+}
+
+export interface StringParamOptions {
+  allowed?: readonly string[];
+  /* Defaults to true. */
+  allowEmpty?: boolean;
+}
+
+export function optStringParam(p: any, name: string, options: StringParamOptions = {}): string | undefined {
+  if (p === undefined) { return p; }
+
+  return stringParam(p, name, options);
+}
+
+export function stringParam(p: any, name: string, options: StringParamOptions = {}): string {
+  const { allowed, allowEmpty = true } = options;
+  if (p === null || p === undefined) {
+    throw new ApiError(`${name} parameter is required`, 400);
+  }
+  if (typeof p !== "string") {
+    throw new ApiError(`${name} parameter should be a string: ${p}`, 400);
+  }
+  if (!allowEmpty && p === "") {
+    throw new ApiError(`${name} parameter cannot be empty`, 400);
+  }
+  if (allowed && !allowed.includes(p)) {
+    throw new ApiError(`${name} parameter ${p} should be one of ${allowed}`, 400);
+  }
+  return p;
+}
+
+export function stringArrayParam(p: any, name: string): string[] {
+  if (!Array.isArray(p)) {
+    throw new ApiError(`${name} parameter should be an array: ${p}`, 400);
+  }
+  if (p.some(el => typeof el !== "string")) {
+    throw new ApiError(`${name} parameter should be a string array: ${p}`, 400);
+  }
+
+  return p;
+}
+
+export function optIntegerParam(
+  p: any,
+  name: string,
+  options?: { nullable?: false; isValid?: (n: number) => boolean },
+): number | undefined;
+export function optIntegerParam(
+  p: any,
+  name: string,
+  options: { nullable: true; isValid?: (n: number) => boolean },
+): number | null | undefined;
+export function optIntegerParam(
+  p: any,
+  name: string,
+  options: { nullable?: boolean; isValid?: (n: number) => boolean } = {},
+): number | undefined {
+  if (p === undefined) {
+    return p;
+  }
+  if (options.nullable && p === "null") {
+    return p;
+  }
+
+  return integerParam(p, name, options);
+}
+
+export function integerParam(
+  p: any,
+  name: string,
+  options: { isValid?: (n: number) => boolean } = {},
+): number {
+  const { isValid } = options;
+  let result: number | null = null;
+  if (typeof p === "number") {
+    result = Math.floor(p);
+  } else if (typeof p === "string") {
+    result = parseInt(p, 10);
+  }
+  if (result === null || Number.isNaN(result)) {
+    throw new ApiError(
+      `${name} parameter cannot be understood as an integer: ${p}`,
+      400,
+    );
+  }
+  if (isValid && !isValid(result)) {
+    throw new ApiError(`${name} parameter is invalid: ${p}`, 400);
+  }
+
+  return result;
+}
+
+export function optBooleanParam(p: any, name: string): boolean | undefined {
+  if (p === undefined) { return p; }
+
+  return booleanParam(p, name);
+}
+
+export function booleanParam(p: any, name: string): boolean {
+  if (typeof p === "boolean") { return p; }
+  if (gutil.isAffirmative(p)) { return true; }
+  if (String(p) === "false") { return false; }
+  throw new ApiError(`${name} parameter should be a boolean: ${p}`, 400);
+}
+
+export function optJsonParam(p: any, defaultValue: any): any {
+  if (typeof p !== "string") { return defaultValue; }
+  return gutil.safeJsonParse(p, defaultValue);
+}
+
+export interface RequestWithGristInfo extends Request {
+  gristInfo?: string;
+}
+
+/**
+ * Returns original request origin. In case, when a client was connected to proxy
+ * or load balancer, it reads protocol from forwarded headers.
+ * More can be read on:
+ * https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Forwarded-Proto
+ * https://docs.aws.amazon.com/elasticloadbalancing/latest/classic/x-forwarded-headers.html
+ */
+export function getOriginUrl(req: IncomingMessage) {
+  const host = req.headers.host;
+  const protocol = getEndUserProtocol(req);
+  return `${protocol}://${host}`;
+}
+
+/**
+ * Returns the original request IP address.
+ *
+ * If the request was made through a proxy or load balancer, the IP address
+ * is read from forwarded headers. See:
+ *
+ *  - https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Forwarded-For
+ *  - https://docs.aws.amazon.com/elasticloadbalancing/latest/classic/x-forwarded-headers.html
+ */
+export function getOriginIpAddress(req: IncomingMessage) {
+  return (
+    // May contain multiple comma-separated values; the first one is the original.
+    (req.headers["x-forwarded-for"] as string | undefined)
+      ?.split(",")
+      .map(value => value.trim())[0] ||
+      req.socket?.remoteAddress ||
+      undefined
+  );
+}
+
+/**
+ * Returns the request's "X-Forwarded-For" header, with the request's IP address
+ * appended to its value.
+ *
+ * If the header is absent from the request, a new header will be returned.
+ *
+ * This is intended to be used for audit logging purposes, and can't be relied
+ * on for anything security-critical as it's client spoofable.
+ */
+export function buildXForwardedForHeader(req: IncomingMessage): { "X-Forwarded-For": string } | undefined {
+  const rawXForwardedFor = req.headers["x-forwarded-for"];
+  // This should never actually be an array, but since it's a built-in node type, we should act safely.
+  const xForwardedFor = Array.isArray(rawXForwardedFor) ? rawXForwardedFor : rawXForwardedFor?.split(",");
+  const values = xForwardedFor?.map(value => value.trim()) ?? [];
+  if (req.socket.remoteAddress) { values.push(req.socket.remoteAddress); }
+  return values.length > 0 ? { "X-Forwarded-For": values.join(", ") } : undefined;
+}
+
+/**
+ * Get the protocol to use in Grist URLs that are intended to be reachable
+ * from a user's browser. Use the protocol in APP_HOME_URL if available,
+ * otherwise X-Forwarded-Proto is set on the provided request, otherwise
+ * the protocol of the request itself.
+ */
+export function getEndUserProtocol(req: IncomingMessage) {
+  const homeUrl = getHomeUrl();
+  if (homeUrl) {
+    return new URL(homeUrl).protocol.replace(":", "");
+  }
+  // TODO we shouldn't blindly trust X-Forwarded-Proto. See the Express approach:
+  // https://expressjs.com/en/5x/api.html#trust.proxy.options.table
+  return req.headers["x-forwarded-proto"] || ((req.socket as TLSSocket)?.encrypted ? "https" : "http");
+}
+
+/**
+ * In some configurations, session information may be cached by the server.
+ * When session information changes, give the server a chance to clear its
+ * cache if needed.
+ */
+export function clearSessionCacheIfNeeded(req: Request, options?: {
+  email?: string,
+  org?: string | null,
+  sessionID?: string,
+}) {
+  (req as RequestWithGrist).gristServer?.getSessions().clearCacheIfNeeded(options);
+}
+
+export function addAbortHandler(req: Request, res: Writable, op: () => void) {
+  // It became hard to detect aborted connections in node 16.
+  // In node 14, req.on('close', ...) did the job.
+  // The following is a work-around, until a better way is discovered
+  // or added. Aborting a req will typically lead to 'close' being called
+  // on the response, without writableFinished being set.
+  //   https://github.com/nodejs/node/issues/38924
+  //   https://github.com/nodejs/node/issues/40775
+  res.on("close", () => {
+    const aborted = !res.writableFinished;
+    if (aborted) {
+      op();
+    }
+  });
+}
+
+/**
+   * Attachment-related endpoints can be given some extra flags to
+   * specify a cell in which the attachment is expected to be, so user
+   * access to the attachment can be proven efficiently (otherwise we
+   * have to search for a proof).  A `maybeNew` flag can be set to
+   * specify that the attachment may be a recent upload that is not
+   * yet referenced in the document.
+   */
+export function getExtraAttachmentOptions(req: Request): {
+  cell?: SingleCell,
+  maybeNew?: boolean,
+} {
+  const tableId = optStringParam(req.query.tableId, "tableId");
+  const colId = optStringParam(req.query.colId, "colId");
+  const rowId = optIntegerParam(req.query.rowId, "rowId");
+  if ((tableId || colId || rowId) && !(tableId && colId && rowId)) {
+    throw new ApiError("define all of tableId, colId and rowId, or none.", 400);
+  }
+  const cell = (tableId && colId && rowId) ? { tableId, colId, rowId } : undefined;
+  const maybeNew = gutil.isAffirmative(req.query.maybeNew);
+  return { cell, maybeNew };
+}
+
+/**
+ * Returns true if `urlString` is allowed under `allowedDomains`.
+ *
+ * `allowedDomains` is a comma-separated list of domain entries
+ * (e.g. `"example.com,trusted.org"`). A single entry of `*` is a wildcard
+ * that allows any domain.
+ * Each entry is matched against the URL's host using base-domain matching
+ * (see {@link matchesBaseDomain}), so `example.com` also allows
+ * `sub.example.com`. Empty entries "example.com,,other.com" are ignored.
+ * `undefined` and `""` means an empty list, so no domains are allowed.
+ *
+ * Summary of logic, allowed when all of the those are true:
+ * - `urlString` is a valid URL
+ * - the URL's protocol is `https:`, OR it's `http:` with hostname `localhost`
+ *   (the http+localhost exception is for local dev/testing)
+ * - the URL's host matches one of the entries in `allowedDomains` (or
+ *   `allowedDomains === "*"`, which allows any host), if list is empty then it
+ *   is not allowed.
+ */
+export function isUrlAllowed(allowedDomains: string | undefined, urlString: string) {
+  let url: URL;
+  try {
+    url = new URL(urlString);
+  } catch (e) {
+    return false;
+  }
+
+  // Support at most https and http.
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    return false;
+  }
+
+  // Support a wildcard that allows all domains.
+  // Allow either https or http if it is set.
+  if (allowedDomains === "*") {
+    return true;
+  }
+
+  // http (no s) is only allowed for localhost for testing.
+  // localhost still needs to be explicitly permitted, and it shouldn't be outside dev
+  if (url.protocol !== "https:" && url.hostname !== "localhost") {
+    return false;
+  }
+
+  return (allowedDomains || "").split(",").some(domain =>
+    domain && matchesBaseDomain(url.host, domain),
+  );
+}
+
+/**
+ * http.IncomingMessage.headers has some values typed as strings or arrays of strings
+ * It's very unlikely to ever be an array, but this performs a conversion appropriate for HTTP headers as a precaution.
+ */
+export function toCommaSeparatedString(values: string[] | string): string {
+  return Array.isArray(values) ? values.join(",") : values;
+}
+
+export interface RequestProxyHeaderOptions {
+  // Lowercase<> is used to help prevent typos making proxying not function correctly, based on the assumption
+  // that 99% of the time these will be set via literals. Remove if they prove too annoying.
+  forbidHeaders?: Lowercase<string>[];
+  proxyExtraHeaders?: Lowercase<string>[];
+  defaultHeaders?: Record<Lowercase<string>, string>;
+  // Whether to drop the client's Origin header. Doc-to-doc calls set this: forwarding
+  // the outside Origin to an internal call trips the target's cross-origin credential
+  // check.
+  omitOrigin?: boolean;
+}
+
+/**
+ * Header stamped on a request the first time a Grist server proxies it, so a downstream
+ * hop can recognize (and refuse to re-forward) a request that has already been proxied.
+ * Enforces one-hop semantics, preventing long proxy chains and loops.
+ *
+ * SECURITY: this value is client-spoofable when it arrives from the outside — deployments
+ * are expected to strip x-grist-proxied from external traffic at the load balancer.
+ * Failure to do this will (likely) result in a request hitting the wrong server - resulting in errors.
+ *
+ * Future improvement: Verifying it against an internal secret (e.g. a Permit) would remove that issue,
+ * but also requires additional secret setup.
+ */
+export const GRIST_PROXIED_HEADER = "x-grist-proxied";
+
+/**
+ * True if this request has already been forwarded once by a Grist server (one-hop loop guard).
+ */
+export function hasAlreadyProxiedHeader(req: IncomingMessage): boolean {
+  return Boolean(req.headers[GRIST_PROXIED_HEADER]);
+}
+
+/**
+ * Writes a well-formed HTTP response onto a raw socket and closes it. For code paths that
+ * handle a raw `net.Socket` directly (e.g. `server.on("upgrade")` handlers) and therefore
+ * don't have an `http.ServerResponse` available.
+ */
+export function terminateSocketWithHttpResponse(
+  socket: net.Socket, statusCode: number, body: string = "",
+): void {
+  const statusMessage = http.STATUS_CODES[statusCode];
+  socket.end(
+    `HTTP/1.1 ${statusCode} ${statusMessage}\r\n` +
+    "Content-Type: text/plain\r\n" +
+    "Content-Length: " + Buffer.byteLength(body) + "\r\n" +
+    "Connection: close\r\n" +
+    "\r\n" +
+    body,
+  );
+}
+
+/**
+ * Creates the correct headers for proxying an incoming request to another server.
+ * Returned headers are standardized lower-case to match Node's `http.header`
+ *
+ * The key proxied header uses are:
+ *   auth (Cookie), org detection (Host), origin checks (Origin), locale (Accept-Language),
+ *   and client IP logging (X-Forwarded-For).
+ */
+export function getProxyHeaders(
+  req: IncomingMessage,
+  {
+    forbidHeaders = [], proxyExtraHeaders = [], defaultHeaders = {}, omitOrigin = false,
+  }: RequestProxyHeaderOptions = {},
+): http.OutgoingHttpHeaders {
+  const headers = mapKeys(
+    getTransitiveHeaders(req, { includeOrigin: !omitOrigin }), (value, key) => key.toLowerCase());
+
+  // Set in an internal header so we know this request has already been proxied at least once.
+  headers[GRIST_PROXIED_HEADER] = "true";
+
+  const allAdditionalHeaders =
+    ["accept-language", "content-type"].concat(proxyExtraHeaders.map(header => header.toLowerCase()));
+  // In the future, these might make sense to add as additional headers:
+  //   cache-control, referer, range, accept-encoding, Date, X-Forwarded-Host, Via
+  for (const headerToAdd of allAdditionalHeaders) {
+    const headerValue = req.headers[headerToAdd];
+    if (headerValue && !(headerToAdd in headers)) {
+      headers[headerToAdd] = toCommaSeparatedString(headerValue);
+    }
+  }
+  for (const [header, value] of Object.entries(defaultHeaders)) {
+    if (!(header in headers)) {
+      headers[header] = value;
+    }
+  }
+  for (const header of forbidHeaders) {
+    delete headers[header];
+  }
+  // Precaution to prevent header options accidentally adding hop-by-hop headers.
+  return stripHopByHopHeaders(headers);
+}
+
+// RFC 7230 §6.1. Spec uses "Trailer" (singular), not "Trailers".
+const HOP_BY_HOP_HEADERS: ReadonlySet<string> = new Set([
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+]);
+
+// Strip hop-by-hop headers from a set of HTTP headers.
+// The Connection header may name additional hop-by-hop headers; those are stripped too.
+export function stripHopByHopHeaders(headers: http.IncomingHttpHeaders): http.IncomingHttpHeaders {
+  const dynamicHopByHop = headers.connection ?
+    new Set<string>(toCommaSeparatedString(headers.connection).split(",").map(token => token.trim().toLowerCase())) :
+    new Set<string>();
+
+  if (headers["transfer-encoding"]) {
+    // RFC 7230 3.3.3 says content-length must not be forwarded if transfer-encoding is present, and should be ignored.
+    dynamicHopByHop.add("content-length");
+  }
+
+  return Object.fromEntries(
+    Object.entries(headers).filter(
+      ([name, value]) => !(HOP_BY_HOP_HEADERS.has(name) || dynamicHopByHop.has(name)),
+    ),
+  );
+}
+
+export function isValidHttpProxyProtocol(protocol?: string | null): protocol is "http:" | "https:" {
+  return protocol === "http:" || protocol === "https:";
+}
+
+export interface ProxyHttpRequestOptions extends RequestProxyHeaderOptions {
+  // Extra metadata included in every log line emitted for this proxied request. Typical use:
+  // pass identity the caller has (`docId`, `workerId`, …) so the per-request lines can be
+  // grouped/filtered later.
+  logMeta?: log.ILogMeta;
+}
+
+interface ProxyHttpLogInfo {
+  method?: string;
+  targetUrl: URL;
+  status?: number;
+  durationMs?: number;
+  meta?: log.ILogMeta;
+}
+
+type HttpProxyLogLevel = "debug" | "info" | "warn";
+
+const _httpProxyLog = new LogMethods<ProxyHttpLogInfo>("HTTP proxy ", info => ({
+  method: info.method,
+  targetHost: info.targetUrl.host,
+  targetPath: info.targetUrl.pathname,
+  // Only include status/durationMs when set, to keep lines that don't have them clean.
+  ...(info.status !== undefined ? { status: info.status } : {}),
+  ...(info.durationMs !== undefined ? { durationMs: info.durationMs } : {}),
+  ...info.meta,
+}));
+
+/**
+ * Opens the upstream http/https request shared by the streaming and buffered proxy
+ * paths; the caller wires up body and response. `req` supplies only the proxied headers
+ * (auth, cookie, org) -- the body may differ. `targetUrl` must not be user-influenced
+ * (credential theft). Throws on an unsupported protocol.
+ */
+function openUpstream(
+  req: IncomingMessage, method: string | undefined, targetUrl: string | URL, options?: ProxyHttpRequestOptions,
+): { upstream: http.ClientRequest; target: URL; logInfo: ProxyHttpLogInfo; startTime: number } {
+  const target = new URL(targetUrl);
+  const targetHttpOptions = urlToHttpOptions(target);
+  const protocol = targetHttpOptions.protocol;
+  if (!isValidHttpProxyProtocol(protocol)) {
+    throw new Error(`Unsupported proxy protocol in proxyHttpRequest: ${protocol}`);
+  }
+  const headers = getProxyHeaders(req, options);
+  const startTime = Date.now();
+  const logInfo: ProxyHttpLogInfo = { method, targetUrl: target, meta: options?.logMeta };
+  _httpProxyLog.debug(logInfo, "starting");
+  const doRequest = protocol === "http:" ? http.request : https.request;
+  const upstream = doRequest({
+    hostname: targetHttpOptions.hostname,
+    port: targetHttpOptions.port,
+    path: targetHttpOptions.path,
+    method,
+    headers,
+    // Relies on the clientside or serverside connection closing to abort the proxy.
+    timeout: 0,
+  });
+  return { upstream, target, logInfo, startTime };
+}
+
+export interface BufferedResponse {
+  status: number;
+  headers: http.IncomingHttpHeaders;
+  text: string;
+}
+
+// Node lowercases parsed header names; Lowercase<> makes a mistyped literal a type error.
+const CONTENT_LENGTH: Lowercase<string> = "content-length";
+
+/**
+ * Sends a buffered reply, typically from forwardHttpRequest, on to our own client.
+ *
+ * Which headers may travel is decided here rather than by whoever produced the reply:
+ * hop-by-hop headers describe the connection we made, not this one, and a content-length
+ * describes their copy of a body we re-encode. forwardHttpRequest strips the former too,
+ * so this repeats work on that path -- worth it to keep a relay safe on its own terms.
+ */
+export function relayBufferedResponse(res: Response, response: BufferedResponse): void {
+  const headers = stripHopByHopHeaders(response.headers);
+  delete headers[CONTENT_LENGTH];
+  res.status(response.status).set(headers as Record<string, string | string[]>).send(response.text);
+}
+
+/**
+ * Like proxyHttpRequest, but sends a caller-supplied `body` and buffers the reply so
+ * this server can consume or relay it rather than pipe it to a client: doc-to-doc calls
+ * such as /compare and MCP forwarding. Small JSON only, not large downloads. Uses
+ * http.request directly, so it does not follow redirects (forwarded credentials stay on
+ * the intended host).
+ *
+ * The reply is decoded as utf8 text, so callers must not proxy accept-encoding to it: a
+ * compressed reply would be garbled. Pass the reply to relayBufferedResponse to send it
+ * on to our own client.
+ */
+export function forwardHttpRequest(
+  req: IncomingMessage, method: string, targetUrl: string | URL,
+  body: string | undefined, options?: ProxyHttpRequestOptions,
+): Promise<BufferedResponse> {
+  return new Promise((resolve, reject) => {
+    const { upstream } = openUpstream(req, method, targetUrl, options);
+    upstream.on("response", (res) => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => resolve({
+        status: res.statusCode ?? 500,
+        headers: stripHopByHopHeaders(res.headers),
+        text: Buffer.concat(chunks).toString("utf8"),
+      }));
+      res.on("error", reject);
+    });
+    upstream.on("error", reject);
+    upstream.end(body);
+  });
+}
+
+/**
+ * Proxies a HTTP request from this server to another Grist server (intended to be a DocWorker)
+ * The target URL must not be user influenced, to prevent credentials / authorization tokens being stolen.
+ * Doesn't handle: 103 responses, URLs with basic auth (username:password@domain)
+ * Shouldn't handle: websocket upgrades
+ * @param clientReq - Incoming request (from Express or http.Server)
+ * @param clientRes - Response (from Express or http.Server)
+ * @param targetUrl - URL to proxy to, must be valid and **not user influenced or modified** for security.
+ * @param options
+ */
+export function proxyHttpRequest(
+  clientReq: IncomingMessage, clientRes: ServerResponse, targetUrl: string | URL, options?: ProxyHttpRequestOptions,
+) {
+  return new Promise<void>((resolve, reject) => {
+    const { upstream: backendReq, target, logInfo, startTime } =
+      openUpstream(clientReq, clientReq.method, targetUrl, options);
+
+    // Centralize cleanup to avoid race conditions or non-idempotent operation orders.
+    let isSettled = false;
+    const settle = (
+      err?: Error,
+      logOptions: { level?: HttpProxyLogLevel, extraData?: Partial<ProxyHttpLogInfo> } = {},
+    ) => {
+      const { level = "debug", extraData } = logOptions;
+      // Prevent .destroy() calls from triggering `settle` multiple times.
+      if (isSettled) { return; }
+      isSettled = true;
+
+      const finalInfo: ProxyHttpLogInfo = { ...logInfo, durationMs: Date.now() - startTime, ...extraData };
+      if (err) {
+        _httpProxyLog[level](finalInfo, "request failed due to: %s", err.message);
+      } else {
+        _httpProxyLog[level](finalInfo, "request completed");
+      }
+
+      if (err) {
+        // Best-effort tidy close with a helpful status. Runs from disconnect/error handlers, so it
+        // must never throw: a dropped client must not become a process-killing uncaughtException.
+        try {
+          if (!clientRes.headersSent && clientRes.writable) {
+            const statusCode = 502;
+            const statusMessage = http.STATUS_CODES[statusCode];
+            // Two statements, not a chain: morgan's on-headers wrapper returns undefined from writeHead.
+            clientRes.writeHead(
+              statusCode,
+              statusMessage,
+              insertProxiedToTestHeader({ "content-type": "text/plain; charset=utf-8" }, target.href),
+            );
+            clientRes.end(statusMessage);
+          } else {
+            clientRes.destroy();
+          }
+          clientReq.destroy(err);
+          backendReq.destroy(err);
+        } catch (cleanupErr) {
+          _httpProxyLog.warn(finalInfo, "cleanup after error failed: %s", String(cleanupErr));
+        }
+        reject(err);
+      } else {
+        resolve();
+      }
+    };
+
+    clientRes.on("close", () => {
+      // Terminate the proxy early if the client connection drops.
+      if (!clientRes.writableFinished) {
+        settle(new Error("client terminated connection unexpectedly"), { level: "warn" });
+      }
+    });
+    clientRes.on("error", err => settle(err, { level: "warn" }));
+
+    backendReq.on("timeout", () => settle(new Error("backend socket idle timeout"), { level: "warn" }));
+
+    // Doesn't handle 103 responses. May be worth adding in the future.
+    backendReq.on("response", (backendRes) => {
+      // Extra guard against response being already queued when settle is called, meaning we use a destroyed socket here
+      if (isSettled) { return; }
+      clientRes.writeHead(
+        backendRes.statusCode || 500,
+        backendRes.statusMessage,
+        insertProxiedToTestHeader(stripHopByHopHeaders(backendRes.headers), target.href),
+      );
+      // Pipeline handles stream closing + error cases for clientRes and backendRes
+      pipeline(backendRes, clientRes, err => settle(
+        err ?? undefined,
+        { level: err ? "warn" : "debug", extraData: { status: backendRes.statusCode } },
+      ));
+    });
+
+    // Prevents an erroneous attempt to switch protocols preventing this from resolving (as pipeline will wait).
+    // Should never happen in practice as we never forward the "Upgrade" header
+    backendReq.on("upgrade", (backendRes, socket, head) => {
+      socket.destroy();
+      settle(new Error("backend returned 101 Switching Protocols for non-upgrade request"), { level: "warn" });
+    });
+
+    // Pipeline handles steam closing + error cases for clientReq and backendReq. An error here
+    // means the request body upload failed or the backend connection broke before we got a response
+    // (ECONNREFUSED, ENOTFOUND, EPIPE, etc.).
+    pipeline(clientReq, backendReq, (err) => {
+      if (err) {
+        settle(err, { level: "warn" });
+      }
+    });
+  });
+}
+
+const getProxiedToHeaderEnabled = memoize(() =>
+  appSettings.section("proxy").flag("enableProxiedToHeader").readBool({
+    envVar: "GRIST_TEST_ENABLE_PROXIED_TO_HEADER",
+  }),
+);
+
+/**
+ * Adds the "x-grist-proxied-to" header if enabled.
+ * To be used for debugging / tests only, to avoid leaking internal resource names unintentionally.
+ */
+export function insertProxiedToTestHeader(headers: http.IncomingHttpHeaders, target: string) {
+  if (!getProxiedToHeaderEnabled()) { return headers; }
+  headers["x-grist-proxied-to"] = target;
+  return headers;
+}
+
+/**
+ * Builds a valid proxy path for a doc worker from the incoming request's URL and the target server's URL.
+ * Strips /dw/ and /v/ tags appropriately, to prevent them being doubled in the target URL.
+ *
+ * If doubling happened (e.g. `/dw/id1/v/123/dw/id2/v/456` or `/v/123/dw/id2/v/456`), endpoints will start
+ * giving 404s, as only the leading values will be stripped.
+ *
+ * Returned paths always begin with "/"
+ */
+export function buildProxyPath(targetUrl: URL, reqUrl: string | undefined): string {
+  const parsed = new URL(reqUrl || "/", "http://localhost");
+  // Remove DocWorker IDs from the path, as we're now forwarding to a potentially new doc worker.
+  const pathWithoutDwId = parseFirstUrlPart("dw", parsed.pathname).path;
+  // Remove this version tag, as the doc worker is likely to have its own, and doubling up version tags breaks things.
+  const pathToForward = parseFirstUrlPart("v", pathWithoutDwId).path;
+  // Always returns a path starting with "/", as URL.pathname always begins with "/" for http and https schemes
+  return removeTrailingSlash(targetUrl.pathname) + pathToForward + parsed.search;
+}
+
+/**
+ * Builds the full URL to hand to `proxyHttpRequest` when forwarding to a doc worker.
+ *
+ * Prevents the need for proxy callers to roll their own, as it's easy to introduce security problems.
+ *
+ * e.g. when using `new URL(target, base)`, a maliciously crafted request URL can inject an `//authority`
+ * or absolute-form URL that WHATWG-URL parsing re-interprets as an authority swap.
+ */
+export function buildProxyRequestUrl(target: URL, reqUrl: string | undefined): string {
+  const composed = `${target.origin}${buildProxyPath(target, reqUrl)}`;
+  const parsed = new URL(composed);
+  // Defend against any accidental regressions that allow a malicious request to re-route the proxy.
+  if (parsed.origin !== target.origin) {
+    throw new Error(`final proxy URL escaped target origin: ${target.origin} -> ${parsed.origin}`);
+  }
+  return composed;
+}

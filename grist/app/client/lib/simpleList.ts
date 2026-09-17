@@ -1,0 +1,192 @@
+/**
+ * SimpleList is a simple collection of item. Besides holding the items, it also knows which item is
+ * selected, and allows selection via keyboard. In particular simpleList does not steal focus from
+ * the trigger element, which makes it suitable to show a list of items next to an input element
+ * while user is typing without interfering.
+ *
+ * const array = observable([{label: 'foo': value: 0, {label: 'bar', value: 1}]);
+ * const ctl = popupControl(elem, ctl => SimpleList.create(null, ctl, array, action));
+ *
+ * // Enable keyboard navigation by listening to keys on the element that has focus.
+ * ctl.listenKeys(elem)
+ *
+ * // toggle popup
+ * dom('input', dom.on('click', () => ctl.toggle()));
+ */
+import { kbFocusHighlighterClass } from "app/client/components/KeyboardFocusHighlighter";
+import { attachMouseOverOnMove, findAncestorChild } from "app/client/lib/domUtils";
+import { menuCssClass, menuItem } from "app/client/ui2018/menus";
+
+import { Disposable, dom, DomArg, Observable, styled } from "grainjs";
+import { cssMenu, cssMenuItem, cssMenuWrap, getOptionFull, IOpenController, IOption } from "popweasel";
+import slugify from "slugify";
+import { uniqueId } from "underscore";
+
+export type { IOption, IOptionFull } from "popweasel";
+export { getOptionFull } from "popweasel";
+
+export interface ISimpleListOpt<T, U extends IOption<T> = IOption<T>> {
+  matchTriggerElemWidth?: boolean;
+  ariaLabel?: Observable<string | undefined>;
+  headerDom?(): DomArg<HTMLElement>;
+  renderItem?(item: U): DomArg<HTMLElement>;
+  onSelectedChange?(selectedItem: HTMLElement | null): void;
+}
+
+export class SimpleList<T, U extends IOption<T> = IOption<T>> extends Disposable {
+  public readonly content: HTMLElement;
+  public readonly containerId: string;
+  public readonly listboxId: string;
+  private _menuContent: HTMLElement;
+  private _selected: HTMLElement;
+  private _selectedIndex: number = -1;
+  private _mouseOver: { reset(): void };
+  private _onSelectedChange?: (selectedItem: HTMLElement | null) => void;
+
+  constructor(private _ctl: IOpenController,
+    private _items: Observable<U[]>,
+    private _action: (value: T) => void,
+    opt: ISimpleListOpt<T, U> = {}) {
+    super();
+    this.containerId = `simple-list-${uniqueId()}`;
+    this.listboxId = `${this.containerId}-listbox`;
+    this._onSelectedChange = opt.onSelectedChange;
+    const renderItem = opt.renderItem || ((item: U) => getOptionFull(item).label);
+    this.content = cssMenuWrap(
+      dom("div",
+        (elem) => {
+          if (opt.matchTriggerElemWidth) {
+            const style = elem.style;
+            style.minWidth = _ctl.getTriggerElem().getBoundingClientRect().width + "px";
+            style.marginLeft = "0px";
+            style.marginRight = "0px";
+          }
+        },
+        { id: this.containerId, class: menuCssClass + " grist-floating-menu " + kbFocusHighlighterClass },
+        cssMenu.cls(""),
+        cssMenuExt.cls(""),
+        opt.headerDom?.(),
+        this._menuContent = cssMenuList(
+          { id: this.listboxId, role: "listbox" },
+          dom.attr("aria-label", opt.ariaLabel),
+          dom.forEach(this._items, (i, index) => {
+            const item = getOptionFull(i);
+            return cssOptionRow(
+              {
+                // We expose unique DOM ids, for external components that need to reference them for screen readers.
+                // Note: we don't rely solely on the index because items in the list can move around, for example
+                // when used in a search dropdown. In that case, screen readers need to correctly understand when items
+                // move, and they don't understand if the first item of the list is always id "0". They understand
+                // when it is "0-foo" and then "0-bar".
+                id: `${this.listboxId}-item-${index}-${slugify(item.label)}`,
+                role: "option",
+                class: menuItem.className + " " + cssMenuItem.className,
+              },
+              dom.on("click", () => this._doAction(item.value)),
+              renderItem(i),
+              dom.cls("disabled", Boolean(item.disabled)),
+              dom.data("itemValue", item.value),
+            );
+          }),
+        ),
+      ),
+      dom.on("mouseleave", _ev => this.setSelected(-1)),
+    );
+    this.autoDispose(_items.addListener(() => this._update()));
+    this._mouseOver = attachMouseOverOnMove(
+      this._menuContent,
+      ev => this.setSelected(this._findTargetItem(ev.target)),
+    );
+    const triggerElem = this._ctl.getTriggerElem();
+    triggerElem.setAttribute("aria-owns", this.containerId);
+    this.onDispose(() => triggerElem.removeAttribute("aria-owns"));
+    this._update();
+  }
+
+  public listenKeys(elem: HTMLElement) {
+    this.autoDispose(dom.onKeyElem(elem, "keydown", {
+      Escape: () => this._ctl.close(),
+      ArrowDown: () => this.setSelected(this._getNextSelectable(1)),
+      ArrowUp: () => this.setSelected(this._getNextSelectable(-1)),
+      Enter: () => this._doAction(this._getSelectedData()),
+    }));
+  }
+
+  // When the selected element changes, update the classes of the formerly and newly-selected
+  // elements.
+  public setSelected(index: number) {
+    const elem = (this._menuContent.children[index] as HTMLElement) || null;
+    const prev = this._selected;
+    if (elem !== prev) {
+      const clsName = cssMenuItem.className + "-sel";
+      if (prev) {
+        prev.classList.remove(clsName);
+        prev.removeAttribute("aria-selected");
+      }
+      if (elem) {
+        elem.classList.add(clsName);
+        elem.setAttribute("aria-selected", "true");
+        elem.scrollIntoView({ block: "nearest" });
+      }
+    }
+    this._selected = elem;
+    this._selectedIndex = elem ? index : -1;
+    this._onSelectedChange?.(elem);
+  }
+
+  private _update() {
+    this._mouseOver?.reset();
+  }
+
+  private _findTargetItem(target: EventTarget | null): number {
+    // Find immediate child of this._menuContent which is an ancestor of ev.target.
+    const elem = findAncestorChild(this._menuContent, target as Element | null);
+    if (elem?.classList.contains("disabled")) { return -1; }
+    return Array.prototype.indexOf.call(this._menuContent.children, elem);
+  }
+
+  private _getSelectedData() {
+    return this._selected ? dom.getData(this._selected, "itemValue") : null;
+  }
+
+  private _doAction(value: T | null) {
+    // If value is null, simply close the menu. This happens when pressing enter with no element
+    // selected.
+    if (value !== null) { this._action(value); }
+    this._ctl.close();
+  }
+
+  private _getNext(index: number, step: 1 | -1): number {
+    // Pretend there is an extra element at the end to mean "nothing selected".
+    const xsize = this._items.get().length + 1;
+    const next = (index + step + xsize) % xsize;
+    return (next === xsize - 1) ? -1 : next;
+  }
+
+  private _getNextSelectable(step: 1 | -1): number {
+    let next = this._getNext(this._selectedIndex, step);
+    while (this._menuContent.children[next]?.classList.contains("disabled")) {
+      next = this._getNext(next, step);
+    }
+    return next;
+  }
+}
+const cssMenuList = styled("ul", `
+  overflow: auto;
+  list-style: none;
+  outline: none;
+  padding: 0;
+  width: 100%;
+  margin: 0;
+`);
+const cssOptionRow = styled("li", `
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+`);
+const cssMenuExt = styled("div", `
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+`);

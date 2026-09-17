@@ -1,0 +1,61 @@
+/*
+override components style
+better that it be loaded after matrix-react-sdk/res/css/_components.pcss
+*/
+/*
+example of how to override a style
+.mx_NewRoomIntro > h2 {
+    margin-top: 24px;
+    font-size: 2.4rem;
+    font-weight: 600;
+    color: red; //<- new attribute
+}
+*/
+
+/* This is for release anouncement description text*/
+/* otherwise the text is grey on bleu background */
+div[data-floating-ui-portal][data-floating-ui-inert] * {
+    color: white;
+}
+
+ /* TODO: remove when compound is fixed  */
+/* For tooltip hover, with grey background and black text */
+div[data-floating-ui-focusable] {
+    color: black;
+    background-color: var(--cpd-color-gray-1000);
+}
+
+/* For caption in tooltip on read receipt */
+div[data-floating-ui-portal] {
+    span {
+        color: black;
+    }
+}
+
+/* The first bubble description in the room, should not have blue background  */
+.mx_RoomView_MessageList > li:nth-child(2) {
+    --backgroundColor: transparent !important;
+}
+
+.mx_RoomHeader .mx_FacePile.mx_FacePile_toggled {
+    background: var(--cpd-color-bg-action-primary-rest);
+    color: var(--cpd-color-text-on-solid-primary);
+    font: var(--cpd-font-body-sm-semibold);
+}
+
+/* Alleger le Background d'une ligne de message au survol */
+.mx_EventTile[data-layout=bubble].mx_EventTile_selected:before, .mx_EventTile[data-layout=bubble]:hover:before {
+    background: var(--eventbubble-bg-hover, var(--cpd-color-gray-100));
+}
+
+.mx_ThreadSummary_chevron {
+    background: linear-gradient(270deg,  var(--cpd-color-bg-subtle-secondary) 50%, $system-transparent 100%) !important;
+}
+
+._badge_10dml_8 {
+    min-block-size: 16px;
+}
+
+._roomListItem_rtaba_8 {
+    color: var(--cpd-color-text-primary);
+}

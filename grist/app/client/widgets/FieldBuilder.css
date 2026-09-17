@@ -1,0 +1,48 @@
+.transform_editor {
+  min-height: 28px;
+  margin: 8px 16px;
+  padding: 5px 6px;
+  background-color: var(--grist-theme-ace-editor-bg, white);
+  border: 1px solid var(--grist-theme-input-border, #D9D9D9);
+  border-radius: 3px;
+}
+
+.transform_menu {
+  padding-bottom: 8px;
+}
+
+.fieldbuilder_settings {
+  background-color: var(--grist-theme-right-panel-field-settings-bg, #e8e8e8);
+  margin: 1rem -1px -4px -1px;
+  padding-bottom: 1px;
+}
+
+.fieldbuilder_settings_header {
+  height: 2rem;
+  margin-top: 0px;
+  margin-bottom: 0px;
+}
+
+.fieldbuilder_settings_button {
+  display: inline-block;
+  float: right;
+  padding: 0 1rem;
+  border-radius: 5px;
+  background-color: var(--grist-theme-right-panel-field-settings-button-bg, lightgrey);
+}
+
+.field-comment-indicator {
+  display: none;
+}
+
+.field-with-comments .field-comment-indicator {
+  display: block;
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-top: 11px solid var(--grist-color-orange);
+  border-left: 11px solid transparent;
+  cursor: pointer;
+}

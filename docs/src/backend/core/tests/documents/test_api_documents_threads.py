@@ -1,0 +1,1388 @@
+"""Test Thread viewset."""
+
+from unittest import mock
+
+import pytest
+from rest_framework.test import APIClient
+
+from core import factories, models
+from core.utils.analytics import PosthogEventName
+
+pytestmark = pytest.mark.django_db
+
+# pylint: disable=too-many-lines
+
+
+# Create
+
+
+def test_api_documents_threads_public_document_link_role_reader():
+    """
+    Anonymous users should not be allowed to create threads on public documents with reader
+    link_role.
+    """
+    document = factories.DocumentFactory(
+        link_reach="public",
+        link_role=models.LinkRoleChoices.READER,
+    )
+
+    client = APIClient()
+    response = client.post(
+        f"/api/v1.0/documents/{document.id!s}/threads/",
+        {
+            "body": "test",
+        },
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "link_role", [models.LinkRoleChoices.COMMENTER, models.LinkRoleChoices.EDITOR]
+)
+def test_api_documents_threads_public_document(link_role):
+    """
+    Anonymous users should be allowed to create threads on public documents with commenter
+    link_role.
+    """
+    document = factories.DocumentFactory(
+        link_reach="public",
+        link_role=link_role,
+    )
+
+    client = APIClient()
+    with mock.patch("core.api.viewsets.posthog_capture") as mock_capture:
+        response = client.post(
+            f"/api/v1.0/documents/{document.id!s}/threads/",
+            {
+                "body": "test",
+            },
+        )
+
+    assert response.status_code == 201
+    thread = models.Thread.objects.first()
+    comment = thread.comments.first()
+
+    # The thread creation should be tracked in PostHog
+    mock_capture.assert_called_once_with(
+        PosthogEventName.THREAD_CREATED,
+        None,
+        {"thread_id": str(thread.id)},
+        document=document,
+    )
+
+    content = response.json()
+    assert content == {
+        "id": str(thread.id),
+        "created_at": thread.created_at.isoformat().replace("+00:00", "Z"),
+        "updated_at": thread.updated_at.isoformat().replace("+00:00", "Z"),
+        "creator": None,
+        "comments": [
+            {
+                "id": str(comment.id),
+                "body": "test",
+                "created_at": comment.created_at.isoformat().replace("+00:00", "Z"),
+                "updated_at": comment.updated_at.isoformat().replace("+00:00", "Z"),
+                "user": None,
+                "reactions": [],
+                "abilities": {
+                    "destroy": False,
+                    "update": False,
+                    "partial_update": False,
+                    "reactions": False,
+                    "retrieve": True,
+                },
+            }
+        ],
+        "abilities": {
+            "destroy": False,
+            "update": False,
+            "partial_update": False,
+            "resolve": False,
+            "unresolve": False,
+            "retrieve": True,
+        },
+        "metadata": {},
+        "resolved": False,
+        "resolved_at": None,
+        "resolved_by": None,
+    }
+
+
+def test_api_documents_threads_restricted_document():
+    """
+    Authenticated users should not be allowed to create threads on restricted
+    documents with reader roles.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.READER,
+        users=[(user, models.LinkRoleChoices.READER)],
+    )
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.post(
+        f"/api/v1.0/documents/{document.id!s}/threads/",
+        {
+            "body": "test",
+        },
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "role",
+    [role for role in models.RoleChoices.values if role != models.RoleChoices.READER],
+)
+def test_api_documents_threads_restricted_document_editor(role):
+    """
+    Authenticated users should be allowed to create threads on restricted
+    documents with editor roles.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.EDITOR,
+        users=[(user, role)],
+    )
+
+    client = APIClient()
+    client.force_login(user)
+    with mock.patch("core.api.viewsets.posthog_capture") as mock_capture:
+        response = client.post(
+            f"/api/v1.0/documents/{document.id!s}/threads/",
+            {
+                "body": "test",
+            },
+        )
+
+    assert response.status_code == 201
+    thread = models.Thread.objects.first()
+    comment = thread.comments.first()
+
+    # The thread creation should be tracked in PostHog
+    mock_capture.assert_called_once_with(
+        PosthogEventName.THREAD_CREATED,
+        user,
+        {"thread_id": str(thread.id)},
+        document=document,
+    )
+
+    content = response.json()
+    assert content == {
+        "id": str(thread.id),
+        "created_at": thread.created_at.isoformat().replace("+00:00", "Z"),
+        "updated_at": thread.updated_at.isoformat().replace("+00:00", "Z"),
+        "creator": {
+            "full_name": user.full_name,
+            "short_name": user.short_name,
+        },
+        "comments": [
+            {
+                "id": str(comment.id),
+                "body": "test",
+                "created_at": comment.created_at.isoformat().replace("+00:00", "Z"),
+                "updated_at": comment.updated_at.isoformat().replace("+00:00", "Z"),
+                "user": {
+                    "full_name": user.full_name,
+                    "short_name": user.short_name,
+                },
+                "reactions": [],
+                "abilities": {
+                    "destroy": True,
+                    "update": True,
+                    "partial_update": True,
+                    "reactions": True,
+                    "retrieve": True,
+                },
+            }
+        ],
+        "abilities": {
+            "destroy": True,
+            "update": True,
+            "partial_update": True,
+            "resolve": True,
+            "unresolve": True,
+            "retrieve": True,
+        },
+        "metadata": {},
+        "resolved": False,
+        "resolved_at": None,
+        "resolved_by": None,
+    }
+
+
+def test_api_documents_threads_authenticated_document_anonymous_user():
+    """
+    Anonymous users should not be allowed to create threads on authenticated documents.
+    """
+    document = factories.DocumentFactory(
+        link_reach="authenticated",
+        link_role=models.LinkRoleChoices.COMMENTER,
+    )
+
+    client = APIClient()
+    response = client.post(
+        f"/api/v1.0/documents/{document.id!s}/threads/",
+        {
+            "body": "test",
+        },
+    )
+    assert response.status_code == 401
+
+
+def test_api_documents_threads_authenticated_document_reader_role():
+    """
+    Authenticated users should not be allowed to create threads on authenticated
+    documents with reader link_role.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="authenticated",
+        link_role=models.LinkRoleChoices.READER,
+    )
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.post(
+        f"/api/v1.0/documents/{document.id!s}/threads/",
+        {
+            "body": "test",
+        },
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "link_role", [models.LinkRoleChoices.COMMENTER, models.LinkRoleChoices.EDITOR]
+)
+def test_api_documents_threads_authenticated_document(link_role):
+    """
+    Authenticated users should be allowed to create threads on authenticated
+    documents with commenter or editor link_role.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="authenticated",
+        link_role=link_role,
+    )
+
+    client = APIClient()
+    client.force_login(user)
+    with mock.patch("core.api.viewsets.posthog_capture") as mock_capture:
+        response = client.post(
+            f"/api/v1.0/documents/{document.id!s}/threads/",
+            {
+                "body": "test",
+            },
+        )
+
+    assert response.status_code == 201
+    thread = models.Thread.objects.first()
+    comment = thread.comments.first()
+
+    # The thread creation should be tracked in PostHog
+    mock_capture.assert_called_once_with(
+        PosthogEventName.THREAD_CREATED,
+        user,
+        {"thread_id": str(thread.id)},
+        document=document,
+    )
+
+    content = response.json()
+    assert content == {
+        "id": str(thread.id),
+        "created_at": thread.created_at.isoformat().replace("+00:00", "Z"),
+        "updated_at": thread.updated_at.isoformat().replace("+00:00", "Z"),
+        "creator": {
+            "full_name": user.full_name,
+            "short_name": user.short_name,
+        },
+        "comments": [
+            {
+                "id": str(comment.id),
+                "body": "test",
+                "created_at": comment.created_at.isoformat().replace("+00:00", "Z"),
+                "updated_at": comment.updated_at.isoformat().replace("+00:00", "Z"),
+                "user": {
+                    "full_name": user.full_name,
+                    "short_name": user.short_name,
+                },
+                "reactions": [],
+                "abilities": {
+                    "destroy": True,
+                    "update": True,
+                    "partial_update": True,
+                    "reactions": True,
+                    "retrieve": True,
+                },
+            }
+        ],
+        "abilities": {
+            "destroy": True,
+            "update": True,
+            "partial_update": True,
+            "resolve": True,
+            "unresolve": True,
+            "retrieve": True,
+        },
+        "metadata": {},
+        "resolved": False,
+        "resolved_at": None,
+        "resolved_by": None,
+    }
+
+
+# List
+
+
+def test_api_documents_threads_list_public_document_link_role_reader():
+    """
+    Anonymous users should not be allowed to retrieve threads on public documents with reader
+    link_role.
+    """
+    document = factories.DocumentFactory(
+        link_reach="public",
+        link_role=models.LinkRoleChoices.READER,
+    )
+
+    factories.ThreadFactory.create_batch(3, document=document)
+
+    client = APIClient()
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/",
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "link_role", [models.LinkRoleChoices.COMMENTER, models.LinkRoleChoices.EDITOR]
+)
+def test_api_documents_threads_list_public_document_link_role_higher_than_reader(
+    link_role,
+):
+    """
+    Anonymous users should be allowed to retrieve threads on public documents with commenter or
+    editor link_role.
+    """
+    document = factories.DocumentFactory(
+        link_reach="public",
+        link_role=link_role,
+    )
+
+    factories.ThreadFactory.create_batch(3, document=document)
+
+    client = APIClient()
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/",
+    )
+    assert response.status_code == 200
+    assert len(response.json()) == 3
+
+
+def test_api_documents_threads_list_authenticated_document_anonymous_user():
+    """
+    Anonymous users should not be allowed to retrieve threads on authenticated documents.
+    """
+    document = factories.DocumentFactory(
+        link_reach="authenticated",
+        link_role=models.LinkRoleChoices.COMMENTER,
+    )
+
+    factories.ThreadFactory.create_batch(3, document=document)
+
+    client = APIClient()
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/",
+    )
+    assert response.status_code == 401
+
+
+def test_api_documents_threads_list_authenticated_document_reader_role():
+    """
+    Authenticated users should not be allowed to retrieve threads on authenticated
+    documents with reader link_role.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="authenticated",
+        link_role=models.LinkRoleChoices.READER,
+    )
+
+    factories.ThreadFactory.create_batch(3, document=document)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/",
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "link_role", [models.LinkRoleChoices.COMMENTER, models.LinkRoleChoices.EDITOR]
+)
+def test_api_documents_threads_list_authenticated_document(link_role):
+    """
+    Authenticated users should be allowed to retrieve threads on authenticated
+    documents with commenter or editor link_role.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="authenticated",
+        link_role=link_role,
+    )
+
+    factories.ThreadFactory.create_batch(3, document=document)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/",
+    )
+    assert response.status_code == 200
+    assert len(response.json()) == 3
+
+
+def test_api_documents_threads_list_restricted_document_anonymous_user():
+    """
+    Anonymous users should not be allowed to retrieve threads on restricted documents.
+    """
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.COMMENTER,
+    )
+
+    factories.ThreadFactory.create_batch(3, document=document)
+
+    client = APIClient()
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/",
+    )
+    assert response.status_code == 401
+
+
+def test_api_documents_threads_list_restricted_document_reader_role():
+    """
+    Authenticated users should not be allowed to retrieve threads on restricted
+    documents with reader roles.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.READER,
+        users=[(user, models.LinkRoleChoices.READER)],
+    )
+
+    factories.ThreadFactory.create_batch(3, document=document)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/",
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "role",
+    [role for role in models.RoleChoices.values if role != models.RoleChoices.READER],
+)
+def test_api_documents_threads_list_restricted_document_editor(role):
+    """
+    Authenticated users should be allowed to retrieve threads on restricted
+    documents with editor roles.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.EDITOR,
+        users=[(user, role)],
+    )
+
+    factories.ThreadFactory.create_batch(3, document=document)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/",
+    )
+    assert response.status_code == 200
+    assert len(response.json()) == 3
+
+
+@pytest.mark.parametrize("nb_threads", [1, 3])
+def test_api_documents_threads_list_number_of_queries(
+    nb_threads, django_assert_num_queries
+):
+    """
+    Listing threads should run a constant number of queries whatever the number
+    of threads, comments, reactions and reaction users.
+    """
+    document = factories.DocumentFactory(
+        link_reach="public",
+        link_role=models.LinkRoleChoices.COMMENTER,
+    )
+
+    for _ in range(nb_threads):
+        thread = factories.ThreadFactory(document=document)
+        for _ in range(2):
+            comment = factories.CommentFactory(thread=thread)
+            for emoji in ["👍", "🎉"]:
+                factories.ReactionFactory(
+                    comment=comment,
+                    emoji=emoji,
+                    users=factories.UserFactory.create_batch(2),
+                )
+
+    client = APIClient()
+    # 1 query for the document (permission check), 1 for the threads and 1 per
+    # prefetched relation: comments, reactions and reaction users.
+    with django_assert_num_queries(5):
+        response = client.get(
+            f"/api/v1.0/documents/{document.id!s}/threads/",
+        )
+
+    assert response.status_code == 200
+    assert len(response.json()) == nb_threads
+
+
+# Retrieve
+
+
+def test_api_documents_threads_retrieve_public_document_link_role_reader():
+    """
+    Anonymous users should not be allowed to retrieve threads on public documents with reader
+    link_role.
+    """
+    document = factories.DocumentFactory(
+        link_reach="public",
+        link_role=models.LinkRoleChoices.READER,
+    )
+
+    thread = factories.ThreadFactory(document=document)
+
+    client = APIClient()
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "link_role", [models.LinkRoleChoices.COMMENTER, models.LinkRoleChoices.EDITOR]
+)
+def test_api_documents_threads_retrieve_public_document_link_role_higher_than_reader(
+    link_role,
+):
+    """
+    Anonymous users should be allowed to retrieve threads on public documents with commenter or
+    editor link_role.
+    """
+    document = factories.DocumentFactory(
+        link_reach="public",
+        link_role=link_role,
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    comment = factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 200
+    content = response.json()
+    assert content == {
+        "id": str(thread.id),
+        "created_at": thread.created_at.isoformat().replace("+00:00", "Z"),
+        "updated_at": thread.updated_at.isoformat().replace("+00:00", "Z"),
+        "creator": None,
+        "comments": [
+            {
+                "id": str(comment.id),
+                "body": comment.body,
+                "created_at": comment.created_at.isoformat().replace("+00:00", "Z"),
+                "updated_at": comment.updated_at.isoformat().replace("+00:00", "Z"),
+                "user": None,
+                "reactions": [],
+                "abilities": {
+                    "destroy": False,
+                    "update": False,
+                    "partial_update": False,
+                    "reactions": False,
+                    "retrieve": True,
+                },
+            }
+        ],
+        "abilities": {
+            "destroy": False,
+            "update": False,
+            "partial_update": False,
+            "resolve": False,
+            "unresolve": False,
+            "retrieve": True,
+        },
+        "metadata": {},
+        "resolved": False,
+        "resolved_at": None,
+        "resolved_by": None,
+    }
+
+
+def test_api_documents_threads_retrieve_authenticated_document_anonymous_user():
+    """
+    Anonymous users should not be allowed to retrieve threads on authenticated documents.
+    """
+    document = factories.DocumentFactory(
+        link_reach="authenticated",
+        link_role=models.LinkRoleChoices.COMMENTER,
+    )
+
+    thread = factories.ThreadFactory(document=document)
+
+    client = APIClient()
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 401
+
+
+def test_api_documents_threads_retrieve_authenticated_document_reader_role():
+    """
+    Authenticated users should not be allowed to retrieve threads on authenticated
+    documents with reader link_role.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="authenticated",
+        link_role=models.LinkRoleChoices.READER,
+    )
+
+    thread = factories.ThreadFactory(document=document)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "link_role", [models.LinkRoleChoices.COMMENTER, models.LinkRoleChoices.EDITOR]
+)
+def test_api_documents_threads_retrieve_authenticated_document(link_role):
+    """
+    Authenticated users should be allowed to retrieve threads on authenticated
+    documents with commenter or editor link_role.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="authenticated",
+        link_role=link_role,
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    comment = factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 200
+    content = response.json()
+    assert content == {
+        "id": str(thread.id),
+        "created_at": thread.created_at.isoformat().replace("+00:00", "Z"),
+        "updated_at": thread.updated_at.isoformat().replace("+00:00", "Z"),
+        "creator": None,
+        "metadata": {},
+        "resolved": False,
+        "resolved_at": None,
+        "resolved_by": None,
+        "comments": [
+            {
+                "id": str(comment.id),
+                "body": comment.body,
+                "created_at": comment.created_at.isoformat().replace("+00:00", "Z"),
+                "updated_at": comment.updated_at.isoformat().replace("+00:00", "Z"),
+                "user": None,
+                "reactions": [],
+                "abilities": {
+                    "destroy": False,
+                    "update": False,
+                    "partial_update": False,
+                    "reactions": True,
+                    "retrieve": True,
+                },
+            }
+        ],
+        "abilities": {
+            "destroy": False,
+            "update": False,
+            "partial_update": False,
+            "resolve": False,
+            "unresolve": False,
+            "retrieve": True,
+        },
+    }
+
+
+def test_api_documents_threads_retrieve_restricted_document_anonymous_user():
+    """
+    Anonymous users should not be allowed to retrieve threads on restricted documents.
+    """
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.COMMENTER,
+    )
+
+    thread = factories.ThreadFactory(document=document)
+
+    client = APIClient()
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 401
+
+
+def test_api_documents_threads_retrieve_restricted_document_reader_role():
+    """
+    Authenticated users should not be allowed to retrieve threads on restricted
+    documents with reader roles.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.READER,
+        users=[(user, models.LinkRoleChoices.READER)],
+    )
+
+    thread = factories.ThreadFactory(document=document)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "role", [models.RoleChoices.COMMENTER, models.RoleChoices.EDITOR]
+)
+def test_api_documents_threads_retrieve_restricted_document_editor(role):
+    """
+    Authenticated users should be allowed to retrieve threads on restricted
+    documents with editor roles.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.EDITOR,
+        users=[(user, role)],
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    comment = factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 200
+    content = response.json()
+    assert content == {
+        "id": str(thread.id),
+        "created_at": thread.created_at.isoformat().replace("+00:00", "Z"),
+        "updated_at": thread.updated_at.isoformat().replace("+00:00", "Z"),
+        "creator": None,
+        "comments": [
+            {
+                "id": str(comment.id),
+                "body": comment.body,
+                "created_at": comment.created_at.isoformat().replace("+00:00", "Z"),
+                "updated_at": comment.updated_at.isoformat().replace("+00:00", "Z"),
+                "user": None,
+                "reactions": [],
+                "abilities": {
+                    "destroy": False,
+                    "update": False,
+                    "partial_update": False,
+                    "reactions": True,
+                    "retrieve": True,
+                },
+            }
+        ],
+        "abilities": {
+            "destroy": False,
+            "update": False,
+            "partial_update": False,
+            "resolve": False,
+            "unresolve": False,
+            "retrieve": True,
+        },
+        "metadata": {},
+        "resolved": False,
+        "resolved_at": None,
+        "resolved_by": None,
+    }
+
+
+@pytest.mark.parametrize("role", [models.RoleChoices.ADMIN, models.RoleChoices.OWNER])
+def test_api_documents_threads_retrieve_restricted_document_privileged_roles(role):
+    """
+    Authenticated users with privileged roles should be allowed to retrieve
+    threads on restricted documents with editor roles.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.EDITOR,
+        users=[(user, role)],
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    comment = factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.get(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 200
+    content = response.json()
+    assert content == {
+        "id": str(thread.id),
+        "created_at": thread.created_at.isoformat().replace("+00:00", "Z"),
+        "updated_at": thread.updated_at.isoformat().replace("+00:00", "Z"),
+        "creator": None,
+        "comments": [
+            {
+                "id": str(comment.id),
+                "body": comment.body,
+                "created_at": comment.created_at.isoformat().replace("+00:00", "Z"),
+                "updated_at": comment.updated_at.isoformat().replace("+00:00", "Z"),
+                "user": None,
+                "reactions": [],
+                "abilities": {
+                    "destroy": True,
+                    "update": False,
+                    "partial_update": False,
+                    "reactions": True,
+                    "retrieve": True,
+                },
+            }
+        ],
+        "abilities": {
+            "destroy": True,
+            "update": True,
+            "partial_update": True,
+            "resolve": True,
+            "unresolve": True,
+            "retrieve": True,
+        },
+        "metadata": {},
+        "resolved": False,
+        "resolved_at": None,
+        "resolved_by": None,
+    }
+
+
+@pytest.mark.parametrize("nb_comments", [1, 3])
+def test_api_documents_threads_retrieve_number_of_queries(
+    nb_comments, django_assert_num_queries
+):
+    """
+    Retrieving a thread should run a constant number of queries whatever the
+    number of comments, reactions and reaction users.
+    """
+    document = factories.DocumentFactory(
+        link_reach="public",
+        link_role=models.LinkRoleChoices.COMMENTER,
+    )
+
+    thread = factories.ThreadFactory(document=document)
+    for _ in range(nb_comments):
+        comment = factories.CommentFactory(thread=thread)
+        for emoji in ["👍", "🎉"]:
+            factories.ReactionFactory(
+                comment=comment,
+                emoji=emoji,
+                users=factories.UserFactory.create_batch(2),
+            )
+
+    client = APIClient()
+    # 1 query for the thread and 1 per prefetched relation: comments, reactions
+    # and reaction users.
+    with django_assert_num_queries(4):
+        response = client.get(
+            f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+        )
+
+    assert response.status_code == 200
+    assert len(response.json()["comments"]) == nb_comments
+
+
+# Destroy
+
+
+def test_api_documents_threads_destroy_public_document_anonymous_user():
+    """
+    Anonymous users should not be allowed to destroy threads on public documents.
+    """
+    document = factories.DocumentFactory(
+        link_reach="public",
+        link_role=models.LinkRoleChoices.COMMENTER,
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    response = client.delete(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 401
+
+
+def test_api_documents_threads_destroy_public_document_authenticated_user():
+    """
+    Authenticated users should not be allowed to destroy threads on public documents.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="public",
+        link_role=models.LinkRoleChoices.COMMENTER,
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.delete(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 403
+
+
+def test_api_documents_threads_destroy_authenticated_document_anonymous_user():
+    """
+    Anonymous users should not be allowed to destroy threads on authenticated documents.
+    """
+    document = factories.DocumentFactory(
+        link_reach="authenticated",
+        link_role=models.LinkRoleChoices.COMMENTER,
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    response = client.delete(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 401
+
+
+def test_api_documents_threads_destroy_authenticated_document_reader_role():
+    """
+    Authenticated users should not be allowed to destroy threads on authenticated
+    documents with reader link_role.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="authenticated",
+        link_role=models.LinkRoleChoices.READER,
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.delete(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "link_role", [models.LinkRoleChoices.COMMENTER, models.LinkRoleChoices.EDITOR]
+)
+def test_api_documents_threads_destroy_authenticated_document(link_role):
+    """
+    Authenticated users should not be allowed to destroy threads on authenticated
+    documents with commenter or editor link_role.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="authenticated",
+        link_role=link_role,
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.delete(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 403
+
+
+def test_api_documents_threads_destroy_restricted_document_anonymous_user():
+    """
+    Anonymous users should not be allowed to destroy threads on restricted documents.
+    """
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.COMMENTER,
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    response = client.delete(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 401
+
+
+def test_api_documents_threads_destroy_restricted_document_reader_role():
+    """
+    Authenticated users should not be allowed to destroy threads on restricted
+    documents with reader roles.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.READER,
+        users=[(user, models.LinkRoleChoices.READER)],
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.delete(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "role", [models.RoleChoices.COMMENTER, models.RoleChoices.EDITOR]
+)
+def test_api_documents_threads_destroy_restricted_document_editor(role):
+    """
+    Authenticated users should not be allowed to destroy threads on restricted
+    documents with editor roles.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.EDITOR,
+        users=[(user, role)],
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.delete(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("role", [models.RoleChoices.ADMIN, models.RoleChoices.OWNER])
+def test_api_documents_threads_destroy_restricted_document_privileged_roles(role):
+    """
+    Authenticated users with privileged roles should be allowed to destroy
+    threads on restricted documents with editor roles.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.EDITOR,
+        users=[(user, role)],
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.delete(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/",
+    )
+    assert response.status_code == 204
+    assert not models.Thread.objects.filter(id=thread.id).exists()
+
+
+# Resolve / Unresolve
+
+
+@pytest.mark.parametrize("action", ["resolve", "unresolve"])
+def test_api_documents_threads_resolve_unresolve_public_document_anonymous_user(action):
+    """
+    Anonymous users should not be allowed to resolve or unresolve threads on public documents.
+    """
+    document = factories.DocumentFactory(
+        link_reach="public",
+        link_role=models.LinkRoleChoices.COMMENTER,
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    response = client.post(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/{action}/",
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize("action", ["resolve", "unresolve"])
+def test_api_documents_threads_resolve_unresolve_public_document_authenticated_user(
+    action,
+):
+    """
+    Authenticated users should not be allowed to resolve or unresolve threads on public documents.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="public",
+        link_role=models.LinkRoleChoices.COMMENTER,
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.post(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/{action}/",
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("action", ["resolve", "unresolve"])
+def test_api_documents_threads_resolve_unresolve_authenticated_document_anonymous_user(
+    action,
+):
+    """
+    Anonymous users should not be allowed to resolve or unresolve threads on authenticated
+    documents.
+    """
+    document = factories.DocumentFactory(
+        link_reach="authenticated",
+        link_role=models.LinkRoleChoices.COMMENTER,
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    response = client.post(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/{action}/",
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize("action", ["resolve", "unresolve"])
+def test_api_documents_threads_resolve_unresolve_authenticated_document_reader_role(
+    action,
+):
+    """
+    Authenticated users should not be allowed to resolve or unresolve threads on authenticated
+    documents with reader link_role.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="authenticated",
+        link_role=models.LinkRoleChoices.READER,
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.post(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/{action}/",
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("action", ["resolve", "unresolve"])
+@pytest.mark.parametrize(
+    "link_role", [models.LinkRoleChoices.COMMENTER, models.LinkRoleChoices.EDITOR]
+)
+def test_api_documents_threads_resolve_unresolve_authenticated_document(
+    link_role, action
+):
+    """
+    Authenticated users should not be allowed to resolve or unresolve threads on authenticated
+    documents with commenter or editor link_role.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="authenticated",
+        link_role=link_role,
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.post(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/{action}/",
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("action", ["resolve", "unresolve"])
+def test_api_documents_threads_resolve_unresolve_restricted_document_anonymous_user(
+    action,
+):
+    """
+    Anonymous users should not be allowed to resolve or unresolve threads on restricted documents.
+    """
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.COMMENTER,
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    response = client.post(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/{action}/",
+    )
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize("action", ["resolve", "unresolve"])
+def test_api_documents_threads_resolve_unresolve_restricted_document_reader_role(
+    action,
+):
+    """
+    Authenticated users should not be allowed to resolve or unresolve threads on restricted
+    documents with reader roles.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.READER,
+        users=[(user, models.LinkRoleChoices.READER)],
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.post(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/{action}/",
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("action", ["resolve", "unresolve"])
+@pytest.mark.parametrize(
+    "role", [models.RoleChoices.COMMENTER, models.RoleChoices.EDITOR]
+)
+def test_api_documents_threads_resolve_unresolve_restricted_document_editor(
+    role, action
+):
+    """
+    Authenticated users should not be allowed to resolve or unresolve threads on restricted
+    documents with commenter or editor roles.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.EDITOR,
+        users=[(user, role)],
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.post(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/{action}/",
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("role", [models.RoleChoices.ADMIN, models.RoleChoices.OWNER])
+def test_api_documents_threads_resolve_restricted_document_privileged_roles(role):
+    """
+    Authenticated users with privileged roles should be allowed to resolve threads on
+    restricted documents with editor roles.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.EDITOR,
+        users=[(user, role)],
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.post(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/resolve/",
+    )
+    assert response.status_code == 204
+
+    thread.refresh_from_db()
+    assert thread.resolved is True
+    assert thread.resolved_at is not None
+    assert thread.resolved_by == user
+
+
+@pytest.mark.parametrize("role", [models.RoleChoices.ADMIN, models.RoleChoices.OWNER])
+def test_api_documents_threads_unresolve_restricted_document_privileged_roles(role):
+    """
+    Authenticated users with privileged roles should be allowed to unresolve threads on
+    restricted documents.
+    """
+    user = factories.UserFactory()
+    document = factories.DocumentFactory(
+        link_reach="restricted",
+        link_role=models.LinkRoleChoices.EDITOR,
+        users=[(user, role)],
+    )
+
+    thread = factories.ThreadFactory(document=document, creator=None, resolved=True)
+    factories.CommentFactory(thread=thread, user=None)
+
+    client = APIClient()
+    client.force_login(user)
+    response = client.post(
+        f"/api/v1.0/documents/{document.id!s}/threads/{thread.id!s}/unresolve/",
+    )
+    assert response.status_code == 204
+
+    thread.refresh_from_db()
+    assert thread.resolved is False
+    assert thread.resolved_at is None
+    assert thread.resolved_by is None

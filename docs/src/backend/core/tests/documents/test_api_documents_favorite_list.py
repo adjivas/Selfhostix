@@ -1,0 +1,187 @@
+"""Test for the document favorite_list endpoint."""
+
+from datetime import timedelta
+
+from django.utils import timezone
+
+import pytest
+from rest_framework.test import APIClient
+
+from core import factories, models
+
+pytestmark = pytest.mark.django_db
+
+
+def test_api_document_favorite_list_anonymous():
+    """Anonymous users should receive a 401 error."""
+    client = APIClient()
+
+    response = client.get("/api/v1.0/documents/favorites/")
+
+    assert response.status_code == 401
+
+
+def test_api_document_favorite_list_authenticated_no_favorite():
+    """Authenticated users should receive an empty list."""
+    user = factories.UserFactory()
+    client = APIClient()
+    client.force_login(user)
+
+    response = client.get("/api/v1.0/documents/favorites/")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "count": 0,
+        "next": None,
+        "previous": None,
+        "results": [],
+    }
+
+
+def test_api_document_favorite_list_authenticated_with_favorite():
+    """Authenticated users with a favorite should receive the favorite."""
+
+    user = factories.UserFactory()
+    client = APIClient()
+    client.force_login(user)
+
+    # If the user doesn't have access to this document (e.g the user had access
+    # and this access was removed), it should not be in the favorite list anymore.
+    factories.DocumentFactory(favorited_by=[user])
+
+    document = factories.UserDocumentAccessFactory(
+        user=user, role=models.RoleChoices.READER, document__favorited_by=[user]
+    ).document
+
+    response = client.get("/api/v1.0/documents/favorites/")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "count": 1,
+        "next": None,
+        "previous": None,
+        "results": [
+            {
+                "abilities": document.get_abilities(user),
+                "ancestors_link_reach": None,
+                "ancestors_link_role": None,
+                "computed_link_reach": document.computed_link_reach,
+                "computed_link_role": document.computed_link_role,
+                "created_at": document.created_at.isoformat().replace("+00:00", "Z"),
+                "creator": str(document.creator.id),
+                "deleted_at": None,
+                "depth": document.depth,
+                "excerpt": document.excerpt,
+                "id": str(document.id),
+                "is_favorite": True,
+                "link_reach": document.link_reach,
+                "link_role": document.link_role,
+                "nb_accesses_ancestors": 1,
+                "nb_accesses_direct": 1,
+                "numchild": document.numchild,
+                "path": document.path,
+                "title": document.title,
+                "updated_at": document.updated_at.isoformat().replace("+00:00", "Z"),
+                "user_role": "reader",
+            }
+        ],
+    }
+
+
+def test_api_document_favorite_list_with_favorite_children():
+    """Authenticated users should receive their favorite documents, including children."""
+
+    user = factories.UserFactory()
+    client = APIClient()
+    client.force_login(user)
+
+    root = factories.DocumentFactory(creator=user, users=[user])
+    children = factories.DocumentFactory.create_batch(
+        2, parent=root, favorited_by=[user]
+    )
+
+    access = factories.UserDocumentAccessFactory(
+        user=user, role=models.RoleChoices.READER, document__favorited_by=[user]
+    )
+
+    other_root = factories.DocumentFactory(creator=user, users=[user])
+    factories.DocumentFactory.create_batch(2, parent=other_root)
+
+    response = client.get("/api/v1.0/documents/favorites/")
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 3
+
+    content = response.json()["results"]
+
+    assert content[0]["id"] == str(access.document.id)
+    assert content[1]["id"] == str(children[1].id)
+    assert content[2]["id"] == str(children[0].id)
+
+
+def test_api_document_favorite_list_sorted_by_updated_at():
+    """
+    Authenticated users should receive their favorite documents including children
+    sorted by last updated_at timestamp.
+    """
+    user = factories.UserFactory()
+    client = APIClient()
+    client.force_login(user)
+
+    root = factories.DocumentFactory(creator=user, users=[user])
+    children = factories.DocumentFactory.create_batch(
+        2, parent=root, favorited_by=[user]
+    )
+
+    access = factories.UserDocumentAccessFactory(
+        user=user, role=models.RoleChoices.READER, document__favorited_by=[user]
+    )
+
+    other_root = factories.DocumentFactory(creator=user, users=[user])
+    factories.DocumentFactory.create_batch(2, parent=other_root)
+
+    now = timezone.now()
+
+    models.Document.objects.filter(pk=children[0].pk).update(
+        updated_at=now + timedelta(seconds=2)
+    )
+    models.Document.objects.filter(pk=children[1].pk).update(
+        updated_at=now + timedelta(seconds=3)
+    )
+
+    response = client.get("/api/v1.0/documents/favorites/")
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 3
+
+    content = response.json()["results"]
+
+    assert content[0]["id"] == str(children[1].id)
+    assert content[1]["id"] == str(children[0].id)
+    assert content[2]["id"] == str(access.document.id)
+
+
+def test_api_document_favorite_list_with_deleted_child():
+    """
+    Authenticated users should not see deleted documents in their favorite list.
+    """
+    user = factories.UserFactory()
+    client = APIClient()
+    client.force_login(user)
+
+    root = factories.DocumentFactory(creator=user, users=[user], favorited_by=[user])
+    child1, child2 = factories.DocumentFactory.create_batch(
+        2, parent=root, favorited_by=[user]
+    )
+
+    child1.delete()
+
+    response = client.get("/api/v1.0/documents/favorites/")
+
+    assert response.status_code == 200
+    assert response.json()["count"] == 2
+
+    content = response.json()["results"]
+
+    assert content[0]["id"] == str(root.id)
+    assert content[1]["id"] == str(child2.id)

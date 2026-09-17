@@ -1,0 +1,103 @@
+import { makeT } from "app/client/lib/localization";
+import { getHomeUrl } from "app/client/models/AppModel";
+import { Notifier } from "app/client/models/NotifyModel";
+import { ActivationAPIImpl, ActivationStatus } from "app/common/ActivationAPI";
+import { ConfigAPI } from "app/common/ConfigAPI";
+import { delay } from "app/common/delay";
+import { editionFromDeploymentType, GristEdition } from "app/common/gristUrls";
+import { InstallAPIImpl } from "app/common/InstallAPI";
+import { getGristConfig } from "app/common/urlUtils";
+
+import { Disposable, Observable } from "grainjs";
+
+const t = makeT("ToggleEnterpriseModel");
+
+export class ToggleEnterpriseModel extends Disposable {
+  public readonly edition: Observable<GristEdition | null> = Observable.create(this, null);
+  public readonly status: Observable<ActivationStatus | null> = Observable.create(this, null);
+  public readonly busy: Observable<boolean> = Observable.create(this, false);
+  private readonly _configAPI: ConfigAPI = new ConfigAPI(getHomeUrl());
+  private readonly _installAPI: InstallAPIImpl = new InstallAPIImpl(getHomeUrl());
+  private readonly _activationAPI: ActivationAPIImpl = new ActivationAPIImpl(getHomeUrl());
+
+  constructor(private _notifier: Notifier) {
+    super();
+  }
+
+  public async fetchEnterpriseToggle() {
+    const { deploymentType } = getGristConfig();
+    this.edition.set(deploymentType ? editionFromDeploymentType(deploymentType) : null);
+    if (deploymentType === "enterprise") {
+      const status = await this._activationAPI.getActivationStatus();
+      if (this.isDisposed()) {
+        return;
+      }
+      this.status.set(status);
+    }
+  }
+
+  public async updateEnterpriseToggle(edition: GristEdition): Promise<void> {
+    // We may be restarting the server, so these requests may well
+    // fail if done in quick succession.
+    const task = async () => {
+      await retryOnNetworkError(() => this._installAPI.updateInstallPrefs({
+        envVars: { GRIST_SERVER_EDITION: edition },
+      }));
+      this.edition.set(edition);
+      await retryOnNetworkError(() => this._configAPI.restartServer());
+    };
+    await this._doWork(task);
+  }
+
+  public async activateEnterprise(key: string) {
+    const task = async () => {
+      await this._activationAPI.activateEnterprise(key);
+      await retryOnNetworkError(() => this._configAPI.restartServer());
+    };
+    await this._doWork(task);
+  }
+
+  private async _doWork(func: () => Promise<void>) {
+    if (this.busy.get()) {
+      throw new Error(t("Please wait for the previous operation to complete."));
+    }
+    this.busy.set(true);
+    try {
+      await this._notifier.slowNotification(func());
+      await this._reloadWhenReady();
+    } catch (err) {
+      this.busy.set(false);
+      throw err;
+    }
+  }
+
+  private async _reloadWhenReady() {
+    if (!await this._configAPI.waitUntilReady()) {
+      throw new Error(t("Timed out on waiting for the Grist backend to restart"));
+    }
+    this.busy.set(false);
+    window.location.reload();
+  }
+}
+
+// Copied from DocPageModel.ts
+const reconnectIntervals = [1000, 1000, 2000, 5000, 10000];
+export async function retryOnNetworkError<R>(func: () => Promise<R>): Promise<R> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await func();
+    } catch (err) {
+      // fetch() promises that network errors are reported as TypeError. We'll accept NetworkError too.
+      if (err.name !== "TypeError" && err.name !== "NetworkError") {
+        throw err;
+      }
+      // We really can't reach the server. Make it known.
+      if (attempt >= reconnectIntervals.length) {
+        throw err;
+      }
+      const reconnectTimeout = reconnectIntervals[attempt];
+      console.warn(`Call to ${func.name} failed, will retry in ${reconnectTimeout} ms`, err);
+      await delay(reconnectTimeout);
+    }
+  }
+}

@@ -1,0 +1,212 @@
+import { ApiError, ApiErrorDetails } from "app/common/ApiError";
+import { tbind } from "app/common/tbind";
+
+import axios, { AxiosRequestConfig, AxiosResponse } from "axios";
+
+export interface IOptions {
+  headers?: Record<string, string>;
+  fetch?: typeof fetch;
+  extraParameters?: Map<string, string>;  // if set, add query parameters to requests.
+  // If set, add the page's "View as" (aclAsUser) params to requests, so URLs this API builds
+  // resolve as the impersonated user, not the owner. Browser-only, and only needed for URLs the
+  // browser fetches directly (downloads, <img> src).
+  propagateViewAs?: boolean;
+}
+
+export interface UploadProgressCallbacks {
+  // Called whenever a progress event is emitted during the upload.
+  // Percent is a number between 0 and 100, or undefined if progress is not available / incalculable.
+  onProgress?: (percent?: number) => void;
+}
+
+/**
+ * Base setup class for creating a REST API client interface.
+ */
+export class BaseAPI {
+  // Count of pending requests. It is relied on by tests.
+  public static numPendingRequests(): number { return this._numPendingRequests; }
+
+  // Wrap a promise to add to the count of pending requests until the promise is resolved.
+  public static async countPendingRequest<T>(promise: Promise<T>): Promise<T> {
+    try {
+      BaseAPI._numPendingRequests++;
+      return await promise;
+    } finally {
+      BaseAPI._numPendingRequests--;
+    }
+  }
+
+  // Define a decorator for methods in BaseAPI or derived classes.
+  public static countRequest(target: unknown, propertyKey: string, descriptor: PropertyDescriptor) {
+    const originalMethod = descriptor.value;
+    descriptor.value = async function(...args: any[]) {
+      return BaseAPI.countPendingRequest(originalMethod.apply(this, args));
+    };
+  }
+
+  // Make a JSON request to the given URL, and read the response as JSON. Handles errors, and
+  // counts pending requests in the same way as BaseAPI methods do.
+  public static requestJson(url: string, init: RequestInit = {}): Promise<unknown> {
+    return new BaseAPI().requestJson(url, init);
+  }
+
+  // Make a request to the given URL, and read the response. Handles errors, and
+  // counts pending requests in the same way as BaseAPI methods do.
+  public static request(url: string, init: RequestInit = {}): Promise<Response> {
+    return new BaseAPI().request(url, init);
+  }
+
+  private static _numPendingRequests: number = 0;
+
+  protected fetch: typeof fetch;
+  private _headers: Record<string, string>;
+  private _extraParameters?: Map<string, string>;
+
+  constructor(public readonly options: IOptions = {}) {
+    this.fetch = options.fetch || tbind(window.fetch, window);
+    this._headers = {
+      "Content-Type": "application/json",
+      "X-Requested-With": "XMLHttpRequest",
+      ...options.headers,
+    };
+    // If we are in the client, and have a boot key query parameter,
+    // pass it on as a header to make it available for authentication.
+    // This is a fallback mechanism if auth is broken to access the
+    // admin panel.
+    // TODO: should this be more selective?
+    if (typeof window !== "undefined" &&
+      window.location?.pathname.endsWith("/admin")) {
+      const bootKey = new URLSearchParams(window.location.search).get("boot-key");
+      if (bootKey) {
+        this._headers["X-Boot-Key"] = bootKey;
+      }
+    }
+    this._extraParameters = options.extraParameters;
+    // Like the boot-key fallback above, read "View as" params straight off the page URL.
+    if (options.propagateViewAs && typeof window !== "undefined") {
+      const sp = new URLSearchParams(window.location?.search);
+      // Prefer the id form, as "View as" links do.
+      const key = sp.has("aclAsUserId_") ? "aclAsUserId_" : sp.has("aclAsUser_") ? "aclAsUser_" : undefined;
+      if (key) {
+        this._extraParameters = new Map(this._extraParameters);
+        this._extraParameters.set(key, sp.get(key)!);
+      }
+    }
+  }
+
+  // Make a modified request, exposed for test convenience.
+  public async testRequest(url: string, init: RequestInit = {}): Promise<Response> {
+    return this.request(url, init);
+  }
+
+  public defaultHeaders() {
+    return this._headers;
+  }
+
+  public defaultHeadersWithoutContentType() {
+    const headers = { ...this.defaultHeaders() };
+    delete headers["Content-Type"];
+    return headers;
+  }
+
+  // Similar to request, but uses the axios library, and supports progress indicator.
+  @BaseAPI.countRequest
+  protected async requestAxios(url: string, config: AxiosRequestConfig): Promise<AxiosResponse> {
+    const resp = await axios.request({
+      url,
+      withCredentials: true,
+      validateStatus: status => true,     // This is more like fetch
+      ...config,
+    });
+    if (resp.status !== 200) {
+      throwApiError(url, resp, resp.data);
+    }
+    return resp;
+  }
+
+  protected async requestWithFormData(url: string, formData: FormData, options: UploadProgressCallbacks = {}) {
+    const { onProgress } = options;
+    onProgress?.(0);
+    const resp = await this.requestAxios(url, {
+      method: "POST",
+      data: formData,
+      onUploadProgress: ev => onProgress?.(ev.progress === undefined ? undefined : ev.progress * 100),
+      // On browser, it is important not to set Content-Type so that the browser takes care
+      // of setting HTTP headers appropriately.  Outside browser, requestAxios has logic
+      // for setting the HTTP headers.
+      headers: { ...this.defaultHeadersWithoutContentType() },
+    });
+    onProgress?.(100);
+    return resp;
+  }
+
+  @BaseAPI.countRequest
+  protected async request(input: string, init: RequestInit = {}): Promise<Response> {
+    return this._doRequest(input, init);
+  }
+
+  /**
+   * Like `request`, but bypasses the pending-request counter. Use for background work
+   * the user isn't waiting on (e.g. prefetches), so tests' `waitForServer` doesn't block.
+   */
+  protected async requestUncounted(input: string, init: RequestInit = {}): Promise<Response> {
+    return this._doRequest(input, init);
+  }
+
+  /**
+   * Make a request, and read the response as JSON. This allows counting the request as pending
+   * until it has been read, which is relied on by tests.
+   */
+  @BaseAPI.countRequest
+  protected async requestJson(input: string, init: RequestInit = {}): Promise<any> {
+    return (await this._doRequest(input, init)).json();
+  }
+
+  /** Like `requestJson`, but bypasses the pending-request counter. See `requestUncounted`. */
+  protected async requestJsonUncounted(input: string, init: RequestInit = {}): Promise<any> {
+    return (await this._doRequest(input, init)).json();
+  }
+
+  // The extra query params (e.g. "View as" aclAsUser_) also sent with every request, exposed so
+  // URL builders for browser-fetched resources (downloads, <img> src) can include them too.
+  protected get extraParameters(): Record<string, string> {
+    return this._extraParameters ? Object.fromEntries(this._extraParameters) : {};
+  }
+
+  private async _doRequest(input: string, init: RequestInit): Promise<Response> {
+    init = Object.assign({ headers: this._headers, credentials: "include" }, init);
+    if (this._extraParameters) {
+      const url = new URL(input);
+      for (const [key, val] of this._extraParameters.entries()) {
+        url.searchParams.set(key, val);
+        input = url.href;
+      }
+    }
+    const resp = await this.fetch(input, init);
+    if (!resp.ok) {
+      const body = await resp.json().catch(() => ({}));
+      throwApiError(input, resp, body);
+    }
+    return resp;
+  }
+}
+
+function throwApiError(url: string, resp: Response | AxiosResponse, body: any) {
+  // If the response includes details, include them into the ApiError we construct. Include
+  // also the error message from the server as details.userError. It's used by the Notifier.
+  if (!body) { body = {}; }
+  const details: ApiErrorDetails = body.details && typeof body.details === "object" ? body.details :
+    { errorDetails: body.details };
+  // If a userError is already specified, do not overwrite it.
+  // (The error handling here is quite confusing, would it not be better
+  // to just unserialize an ApiError into the form it would have had on
+  // the server?)
+  if (body.error && !details.userError) {
+    details.userError = body.error;
+  }
+  if (body.memos) {
+    details.memos = body.memos;
+  }
+  throw new ApiError(`Request to ${url} failed with status ${resp.status}: ` +
+    `${resp.statusText} (${body.error || "unknown cause"})`, resp.status, details);
+}

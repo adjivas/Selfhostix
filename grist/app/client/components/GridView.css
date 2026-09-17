@@ -1,0 +1,465 @@
+.gridview_data_pane {
+  background-color: var(--grist-theme-table-body-bg, white);
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  flex-grow: 1;
+  /* make sure that this element is at the back of the stack */
+  z-index: 0;
+
+  /* prevent browser selection of cells */
+  user-select: none;
+  -moz-user-select: none;
+  -webkit-user-select: none;
+  --gridview-header-height: 24px;
+  /* Width of the row-number gutter, and of the record's left border beside it. Both are set
+   * from JS on this element (both zero when row numbers are hidden); these are the defaults. */
+  --row-num-width: 52px;
+  --row-num-border: 1px;
+}
+
+.gridview_data_scroll {
+  /* Make it position properly */
+  position: absolute;
+  height: 100%;
+  width: 100%;
+  overflow: auto;
+  overscroll-behavior: none;
+
+  z-index: 20; /* scrollbar should be over the overlay background */
+  border-top: 1px solid var(--grist-theme-table-header-border, lightgrey);
+}
+
+.gridview_data_pane > .gridview_data_scroll {
+  border-top: none;
+}
+
+/* ====== Col header stuff */
+
+.gridview_stick-top{
+  position: -webkit-sticky;
+  position: sticky;
+  top: 0px;
+  z-index: 20; /* z-index must be here, doesnt work on children*/
+  border-bottom: 1px solid var(--grist-theme-table-header-border, lightgray);
+  width: fit-content;
+}
+
+.gridview_data_header {
+  position: relative;
+}
+
+.gridview_corner_spacer { /* spacer in .gridview_data_header */
+  width: var(--row-num-width); /* matches row_num width */
+  flex: none;
+}
+
+.field.column_name {
+  line-height: var(--gridview-header-height);
+  height: var(--gridview-header-height); /* Also should match height for overlay elements */
+}
+
+/* also .field.column_name, style set in viewCommon */
+
+/* ====== Row stuff */
+/* (more styles in viewCommon.css for .field, .record, etc) */
+
+.gridview_row {
+  display:flex;
+}
+
+/* The record's left border, against the row-number gutter (viewCommon.css sets its style and
+   color); it collapses together with the gutter. */
+.gridview_data_pane .record {
+  border-left-width: var(--row-num-border);
+}
+
+.gridview_data_row_num { /* Row nums, stick to the left side */
+  position: -webkit-sticky;
+  position: sticky;
+  left: 0px;
+  overflow: hidden;
+  width: var(--row-num-width); /* Also should match width for .gridview_header_corner, and the overlay elements */
+  flex: none;
+
+  border-bottom: 1px solid var(--grist-theme-table-header-border, lightgray);
+  color: var(--grist-theme-table-header-fg, unset);
+  background-color: var(--grist-theme-table-header-bg, var(--grist-color-light-grey));
+  z-index: 20; /* goes over data cells */
+
+  padding-top: 2px;
+  text-align: center;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+/* Row IDs mode: monospace IDs in grey decorative brackets */
+.gridview_row_id {
+  font-family: var(--grist-theme-font-family-mono, monospace);
+  font-size: 0.9em;
+}
+.gridview_row_id::before,
+.gridview_row_id::after {
+  color: var(--grist-theme-text-light, #929299);
+}
+.gridview_row_id::before {
+  content: "[";
+}
+.gridview_row_id::after {
+  content: "]";
+}
+
+/* Menu toggle on a row */
+.gridview_data_row_num .menu_toggle {
+  visibility: hidden;
+  position: absolute;
+  top: 2px;
+  right: 0px;
+}
+
+/* Show on hover or when menu is opened */
+.gridview_data_row_num:hover .menu_toggle,
+.gridview_data_row_num .menu_toggle.weasel-popup-open  {
+  visibility: visible;
+}
+
+
+@media print {
+  /* For printing, !important tag is needed for background colors to be respected; but normally,
+   * do not want !important, as it interferes with row selection.
+   */
+  .gridview_data_row_num {
+    color: var(--grist-theme-table-header-fg, unset) !important;
+    background-color: var(--grist-theme-table-header-bg, var(--grist-color-light-grey)) !important;
+  }
+  .gridview_header_backdrop_top {
+    display: none;
+  }
+  .column_name.mod-add-column {
+    display: none;
+  }
+  .gridview_data_header {
+    background-color: var(--grist-color-light-grey) !important;
+  }
+  .print-widget .gridview_header_backdrop_left, .print-widget .gridview_data_corner_overlay {
+    display: none;
+  }
+  .print-widget .gridview_data_scroll {
+    display: table;
+    border-collapse: collapse;
+    position: relative !important;
+    height: max-content !important;
+  }
+  .print-widget .gridview_stick-top {
+    /* The next two styles *together* tell Chrome to repeat this header on each page */
+    display: table-header-group;
+    break-inside: avoid;
+    position: static;
+    border-top: 1px solid var(--grist-color-dark-grey);
+    border-left: 1px solid var(--grist-color-dark-grey);
+  }
+  .print-widget .gridview_data_header {
+    padding-left: var(--row-num-width) !important;
+  }
+  .print-widget .gridview_data_pane .print-all-rows {
+    display: table-row-group;
+    border-left: 1px solid var(--grist-color-dark-grey);
+  }
+  .print-widget .gridview_data_pane .print-row {
+    display: table-row;
+  }
+}
+
+/* ========= Overlay styles ========== */
+/* Positioned outside scrollpane, purely visual */
+
+.gridview_data_corner_overlay,
+.gridview_header_backdrop_top,
+.gridview_header_backdrop_left,
+.scroll_shadow_top,
+.scroll_shadow_left {
+  position:absolute;
+  background-color: var(--grist-theme-table-header-bg, var(--grist-color-light-grey)) !important;
+}
+
+.gridview_data_corner_overlay {
+  width: var(--row-num-width);
+  height: var(--gridview-header-height);
+  z-index: 30;
+  cursor: pointer;
+}
+
+/* Labels the gutter in Row IDs mode; styled like a column header. */
+.gridview_corner_label {
+  line-height: var(--gridview-header-height);
+  text-align: center;
+  color: var(--grist-theme-table-header-fg, unset);
+}
+
+/* Corner menu toggle (row-numbers menu), styled like the row-header menu toggles. Uses opacity
+ * rather than visibility so that it can also be revealed by hovering the toggle itself when the
+ * gutter is hidden: the corner is then 0px wide and the toggle sits (via the max() below) over
+ * the left edge of the first column header. */
+.gridview_data_corner_overlay .menu_toggle {
+  position: absolute;
+  top: 2px;
+  left: max(4px, calc(var(--row-num-width) - 18px));
+  opacity: 0;
+}
+
+.gridview_data_corner_overlay:hover .menu_toggle,
+.gridview_data_corner_overlay .menu_toggle:hover,
+.gridview_data_corner_overlay .menu_toggle.weasel-popup-open {
+  opacity: 1;
+}
+
+/* Left most shadow - displayed next to row numbers or when columns are frozen - after last frozen column */
+.scroll_shadow_left {
+  height: 100%;
+  width: 0px;
+  /* Unfortunately we need to calculate this using scroll position.
+     We could use sticky position here, but we would need to move this component inside the
+     scroll pane. We don't want to do this, because we want the scroll shadow to be render
+     on top of the scroll bar. Fortunately it doesn't jitter on firefox - where scroll event is asynchronous.
+     Variables used here:
+     - frozen-width : total width of frozen columns plus row numbers width
+     - scroll-offset: current left offset of the scroll pane
+     - frozen-offset: when frozen columns are wider then the screen, we want them to move left initially,
+                      this value is the position where this movement should stop.
+   */
+  left: calc(var(--row-num-width) + (var(--frozen-width, 0) - min(var(--frozen-scroll-offset, 0), var(--frozen-offset, 0))) * 1px);
+  box-shadow: -6px 0 6px 6px var(--grist-theme-table-scroll-shadow, #444);
+  /* shadow should only show to the right of it (10px should be enough) */
+  -webkit-clip-path: polygon(0 0, 10px 0, 10px 100%, 0 100%);
+  clip-path: polygon(0 0, 10px 0, 10px 100%, 0 100%);
+  z-index: 30;
+}
+
+/* Right shadow - normally not displayed - activated when grid has frozen columns */
+.scroll_shadow_frozen {
+  height: 100%;
+  width: 0px;
+  left: var(--row-num-width);
+  box-shadow: -8px 0 14px 4px var(--grist-theme-table-scroll-shadow, #444);
+  -webkit-clip-path: polygon(0 0, 10px 0, 10px 100%, 0 100%);
+  clip-path: polygon(0 0, 28px 0, 24px 100%, 0 100%);
+  z-index: 30;
+  position: absolute;
+}
+
+/* line that indicates where the frozen columns end */
+.frozen_line {
+  position:absolute;
+  height: 100%;
+  width: 2px;
+  /* this value is the same as for the left shadow - but doesn't need to really on the scroll offset
+     as this component will be hidden when the scroll starts
+   */
+  left: calc(var(--row-num-width) + var(--frozen-width, 0) * 1px);
+  background-color: var(--grist-theme-table-frozen-columns-border, #999999);
+  z-index: 30;
+  user-select: none;
+  pointer-events: none
+}
+
+.scroll_shadow_top {
+  left: 0;
+  height: 0;
+  width: 100%; /* needs to be wide enough to flow off the side*/
+  top: var(--gridview-header-height); /* matches gridview_data_header height */
+  box-shadow: 0 -6px 6px 6px var(--grist-theme-table-scroll-shadow, #444);
+
+  /* should only show below it (10px should be enough) */
+  -webkit-clip-path: polygon(0 0, 0 10px, 100% 10px, 100% 0);
+  clip-path: polygon(0 0, 0 10px, 100% 10px, 100% 0);
+  z-index: 30;
+}
+
+.gridview_header_backdrop_left {
+  width: calc(var(--row-num-width) + var(--row-num-border)); /* Matches rowid width (+border) */
+  height:100%;
+  top: 1px; /* go under 1px border on scrollpane */
+  z-index: 10;
+  border-right: var(--row-num-border) solid var(--grist-theme-table-header-border, lightgray);
+}
+
+.gridview_left_border {
+  position: absolute;
+  left: var(--row-num-width);
+  width: 0px; /* Matches rowid width (+border) */
+  height: 100%;
+  z-index: 30;
+  border-right: var(--row-num-border) solid var(--grist-theme-table-body-border, var(--grist-color-dark-grey)) !important;
+  user-select: none;
+  pointer-events: none
+}
+
+.gridview_header_backdrop_top {
+  width: 100%;
+  height: var(--gridview-header-height);
+  z-index: 10;
+}
+
+.gridview_data_pane > .scroll_shadow_top {
+  top: var(--gridview-header-height);
+}
+
+.gridview_data_pane > .gridview_data_corner_overlay,
+.gridview_data_pane > .gridview_header_backdrop_top {
+  top: 0px;
+}
+
+/* End overlay styles */
+
+/* ================ Row/col drag styles*/
+
+.col_indicator_line{
+  width: 0px;
+  height: 100%;
+  position: absolute;
+  border: 2px solid var(--grist-theme-table-drag-drop-indicator, gray);
+  z-index: 200;
+  top: 0px;
+}
+
+.column_shadow{
+  width: 0px;
+  height: 100%;
+  position: absolute;
+  border: 1px solid var(--grist-theme-table-drag-drop-indicator, gray);
+  z-index: 150;
+  top: 0px;
+  background-color: var(--grist-theme-table-drag-drop-shadow, #F0F0F0);
+  opacity: 0.5;
+  pointer-events: none;   /* allow scrolling the grid while column_shadow is under the cursor */
+}
+
+.row_indicator_line{
+  width: 100%;
+  height: 0px;
+  position: absolute;
+  border: 2px solid var(--grist-theme-table-drag-drop-indicator, gray);
+  z-index: 200;
+  left: 0px;
+}
+
+.row_shadow{
+  width: 100%;
+  height: 0px;
+  position: absolute;
+  border: 1px solid var(--grist-theme-table-drag-drop-indicator, gray);
+  z-index: 150;
+  left: 0px;
+  background-color: var(--grist-theme-table-drag-drop-shadow, #F0F0F0);
+  opacity: 0.5;
+  pointer-events: none; /* prevents row drag shadow from stealing row headers clicks */
+}
+
+/* ================ Freezing columns */
+
+/* style header and a data field */
+.record .field.frozen {
+  position: sticky;
+  left: calc(var(--row-num-width) + var(--row-num-border) + (var(--frozen-position, 0) - var(--frozen-offset, 0)) * 1px); /* row-number gutter + its border + total width of cells */
+  z-index: 10;
+}
+/* for data field we need to reuse color from record (add-row and zebra stripes) */
+.gridview_row .record .field.frozen {
+  background-color: var(--field-background-color, inherit);
+}
+
+.gridview_row .record.record-add .field.frozen {
+  background-color: inherit !important;  /* important to win over zebra stripes */
+}
+
+/* HACK: add box shadow to fix outline overflow from active cursor */
+.gridview_row .record .field.frozen {
+  box-shadow: 0px 1px 0px white;
+}
+
+.gridview_row .record.record-hlines .field.frozen {
+  box-shadow: 0px 1px 0px var(--grist-theme-table-body-border, var(--grist-color-dark-grey));
+}
+
+/* make room for a frozen line by adding margin to first not frozen field - in header and in data */
+.field.frozen + .field:not(.frozen) {
+  margin-left: 1px;
+}
+
+/* printing frozen fields is straightforward - just need to remove transparency */
+@media print {
+  .field.frozen  {
+    background: white !important;
+  }
+  .column_names .column_name.frozen {
+    background: var(--grist-theme-table-header-bg, var(--grist-color-light-grey)) !important;
+  }
+}
+
+/* Highlight the entire column when the "Click to insert" tooltip is shown. */
+.column_name.hover-column > .selection,
+.column_name.hover-column.selected > .selection,
+.gridview_row .field.hover-column > .selection {
+  background-color: var(--grist-theme-selection, var(--grist-color-selection));
+  inset: 0;
+  position: absolute;
+}
+
+/* Use a darker highlight if the column is being transformed. */
+.gridview_row .field.transform_field.hover-column > .selection {
+  background-color: var(--grist-theme-selection-darkest, rgba(22,179,120,0.35));
+  inset: 0;
+  position: absolute;
+}
+
+/* And hide the column menu button. */
+.column_name.hover-column .menu_toggle {
+  visibility: hidden;
+}
+
+.column_name .menu_toggle {
+  z-index: 1;
+}
+/* Etc */
+
+.g-column-main-menu {
+  position: absolute;
+  top: 3px;
+  right: 2px;
+}
+
+
+.validation_error_number {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  width: 24px;
+  height: 24px;
+  padding-top: 10px;
+  padding-right: 10px;
+  border-radius: 12px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: bold;
+  background: red;
+  color: white;
+}
+
+.column_name.mod-add-column {
+  border-right-width: 1px;
+  min-width: 40px;
+  padding-right: 12px;
+}
+
+.g-column-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.g-column-label .info_toggle_icon {
+  width: 13px;
+  height: 13px;
+  margin-right: 4px;
+  z-index: 1;
+}

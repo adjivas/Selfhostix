@@ -1,0 +1,53 @@
+# Triggers after the layered build has finished, taking the artifact
+# and uploading it to netlify
+name: Upload Preview Build to Netlify
+on:
+    # Privilege escalation necessary to publish to Netlify
+    # 🚨 We must not execute any checked out code here.
+    workflow_run: # zizmor: ignore[dangerous-triggers]
+        workflows: ["Build"]
+        types:
+            - completed
+jobs:
+    deploy:
+        if: github.event.workflow_run.conclusion != 'cancelled' && github.event.workflow_run.event == 'pull_request'
+        runs-on: ubuntu-24.04
+        environment: Netlify
+        permissions:
+            actions: read
+            deployments: write
+        steps:
+            - name: 📝 Create Deployment
+              uses: bobheadxi/deployments@648679e8e4915b27893bd7dbc35cb504dc915bc8 # v1
+              id: deployment
+              with:
+                  step: start
+                  token: ${{ secrets.GITHUB_TOKEN }}
+                  env: Netlify
+                  ref: ${{ github.event.workflow_run.head_sha }}
+                  desc: |
+                      Do you trust the author of this PR? Maybe this build will steal your keys or give you malware.
+                      Exercise caution. Use test accounts.
+
+            - name: 📥 Download artifact
+              uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+              with:
+                  github-token: ${{ secrets.GITHUB_TOKEN }}
+                  run-id: ${{ github.event.workflow_run.id }}
+                  name: webapp-ubuntu-24.04
+                  path: webapp
+
+            - name: 📤 Deploy to Netlify
+              uses: matrix-org/netlify-pr-preview@9805cd123fc9a7e421e35340a05e1ebc5dee46b5 # v3
+              with:
+                  path: webapp
+                  owner: ${{ github.event.workflow_run.head_repository.owner.login }}
+                  branch: ${{ github.event.workflow_run.head_branch }}
+                  revision: ${{ github.event.workflow_run.head_sha }}
+                  token: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+                  site_id: ${{ vars.NETLIFY_SITE_ID }}
+                  deployment_env: ${{ steps.deployment.outputs.env }}
+                  deployment_id: ${{ steps.deployment.outputs.deployment_id }}
+                  desc: |
+                      Do you trust the author of this PR? Maybe this build will steal your keys or give you malware.
+                      Exercise caution. Use test accounts.

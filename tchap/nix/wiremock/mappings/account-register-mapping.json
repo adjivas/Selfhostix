@@ -1,0 +1,18 @@
+{
+  "name": "Account Register",
+  "request": {
+    "method": "POST",
+    "urlPathPattern": "/_matrix/identity/v2/account/register"
+  },
+  "response": {
+    "status": 200,
+    "jsonBody": {
+      "token": "abc123_OpaqueString"
+    },
+    "headers": {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*"
+    }
+  },
+  "priority": 100
+}

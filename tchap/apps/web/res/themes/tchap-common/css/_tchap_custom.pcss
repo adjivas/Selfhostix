@@ -1,0 +1,279 @@
+/* override components style */
+/* those overrides are imported in all themes of tchap */
+
+/* hide the passphrase option in the setup options of the secure storage */
+#mx_Dialog_StaticContainer
+    > div
+    > div.mx_Dialog
+    > div.mx_CreateSecretStorageDialog
+    > div:nth-child(2)
+    > form
+    > div.mx_CreateSecretStorageDialog_primaryContainer
+    > label:nth-child(2) {
+    display: none;
+}
+
+/* change link color and decoration in login error when email is not autorized */
+/* EDIT : is not taken into account */
+.mx_Login_error.mx_Login_error_link {
+    color: $alert important!;
+    text-decoration: underline important!;
+}
+
+/* Wrapper for eye in password inputs to show wrong password on press */
+.tc_textInput_postfixComponent {
+    align-items: center;
+    display: flex;
+    height: 100%;
+    justify-content: center;
+    padding: 0 3px;
+}
+
+/* Hide new section "Recommandations de sécurité" in new device manager until we customize it*/
+
+[data-testid="security-recommendations-section"] {
+    display: none;
+}
+
+/* Restore css for Help and About page https://github.com/tchapgouv/tchap-web-v4/issues/694 */ 
+
+.mx_SettingsTab_heading {
+    color: var(--timeline-text-color);
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+    margin-right: 100px;
+    margin-top: 10px;
+}
+.mx_SettingsTab_subheading {
+    color: var(--timeline-text-color);
+    display: block;
+    font-size: 1rem;
+    font-weight: 600;
+    margin-bottom: 10px;
+    margin-right: 100px;
+    margin-top: 12px;
+}
+
+.mx_AuthPage_modalContent {
+
+    .mx_SecondaryButton  {
+        background: rgba(255, 255, 255, 0);
+    }
+}
+
+/* background on auth modal in welcome flow */
+.mx_Welcome {
+    background: rgba(255, 255, 255, 0.66);
+    border-radius: 8px;
+}
+
+/* since we added a header in welcome pages, we need to add this margin for the footer */
+.mx_AuthFooter {
+    margin-top: 25px !important;
+}
+
+.mx_ThreadsActivityCentreButton .mx_ThreadsActivityCentreButton_Icon,
+.mx_ThreadsActivityCentreButton .mx_ThreadsActivityCentreButton_Text {
+    color: var(--sidebar-button-color) !important;
+}
+
+/* reset-password-warning-close-window */
+.mx_AuthBody_text .mx_ErrorMessage {
+    margin-top: 10px;
+    font-weight: bold;
+}
+
+/* tchap legacy call bytton*/
+.mx_LegacyCallEvent_wrapper {
+    .mx_LegacyCallEvent {
+      &.mx_LegacyCallEvent_voice {
+        .mx_LegacyCallEvent_content_button_reportBug span::before {
+            mask-size: 0px;
+            width: 0px;
+            height: 0px;
+            flex-shrink: 0;
+                
+       }
+      }
+
+      &.mx_LegacyCallEvent_video {
+        .mx_LegacyCallEvent_content_button_reportBug span::before {
+            mask-size: 0px;
+            width: 0px;
+            height: 0px;
+            flex-shrink: 0;
+                
+       }
+      }
+    }
+  }
+
+/* tchap green badge color on verification success */
+.mx_E2EIcon_verified::after {
+    mask-image: url("@vector-im/compound-design-tokens/icons/verified.svg");
+    background-color: var(--confirmation-color);
+}
+
+/* For analytics modal, using tchap icon */
+.mx_AnalyticsLearnMoreDialog .mx_AnalyticsLearnMore_image_holder {
+    background-image: url("$(res)/themes/tchap/img/logos/tchap-logo.svg");
+}
+
+/* DSFR Button no border radius -- TODO put back when modals and input also removed border */
+/* .mx_AccessibleButton.mx_AccessibleButton_hasKind {
+    border-radius: 0px;
+} */
+
+:where(.lasuite) {
+    --ul-type: none;
+
+    .lasuite-header__service-title {
+        color: black;
+    }
+}
+
+/* login with proconnect style */
+.mx_Login_submit {
+    border-radius: 4px !important;
+    height: 46px !important;
+}
+
+/* export member list view right panel */
+.mx_MemberListHeaderView {
+    max-height: none;
+}
+
+.mx_UserMenu_contextMenu {
+    .mx_UserMenu_iconKey::before {
+        mask-image: url("@vector-im/compound-design-tokens/icons/key-solid.svg");
+    }
+
+    .mx_UserMenu_iconBug::before {
+        mask-image: url("@vector-im/compound-design-tokens/icons/bug.svg");
+    }
+}
+
+
+// Because of our long explanation about persistent toast on recovery code
+.mx_ToastContainer .mx_Toast_toast .mx_Toast_description {
+    max-width: 500px;
+}
+
+// Using legacy roomList and left panel, we need to add border for the new design UI
+.mx_LeftPanel {
+    background-color: var(--cpd-color-bg-canvas-default);
+    height: 100%;
+    border-right: 1px solid var(--cpd-color-gray-400);
+}
+// add border on search room in left panel
+.mx_RoomSearch {
+    border: 1px solid var(--cpd-color-border-interactive-secondary);
+}
+
+.mx_LeftPanel_exploreButton {
+    border: 1px solid var(--cpd-color-border-interactive-secondary);
+}
+
+.mx_SpacePanel {
+    background-color: var(--cpd-color-bg-canvas-default);
+    border-right: 1px solid var(--cpd-color-gray-400);
+}
+
+/* Separator in the room list */
+/* .mx_RoomTile {
+    border-bottom: var(--cpd-border-width-0-5) solid var(--cpd-color-bg-subtle-secondary);
+} */
+
+.tc_sidebar_tchap {
+    flex: 0 0 auto;
+    border-radius: 8px;
+    position: relative;
+    margin: 12px auto;
+    color: $secondary-content;
+    line-height: 40px;
+    min-height: 40px;
+    min-width: 40px;
+    font-weight: bold;
+    color: var(--main-title-color);
+
+    &.expanded {
+        margin-left: 20px;
+        padding-left: 44px; /* align with toggle collapse button text */
+        padding-right: 8px;
+        background-position: left;
+    }
+
+    &:not(.expanded):hover {
+        background-color: $quaternary-content;
+
+        &::before {
+            background-color: $primary-content;
+        }
+    }
+}
+
+.tc_sidebar_tchap_icon {
+    background-image: url("$(res)/themes/tchap/img/logos/tchap-logo.svg");
+    background-size: contain;
+    background-repeat: no-repeat;
+    background-position: center;
+}
+
+.mx_LeftPanel .mx_LeftPanel_roomListContainer .mx_LeftPanel_filterContainer {
+    margin: 0;
+    padding: 15px 12px 15px;
+}
+
+.mx_EventTile[data-layout=bubble][data-self=true] {
+    --backgroundColor: var(--cpd-color-bg-subtle-primary);
+}
+/* not messages, but visible events */
+.mx_EventTile[data-layout=bubble][data-self=true].mx_EventTile_info {
+    --backgroundColor: transparent;
+}
+
+/* send button using ui kit blue */
+.mx_MessageComposer_sendMessage {
+    background-color: var(--cpd-color-bg-action-primary-rest);
+}
+
+/* For pills when mentionning on messages */
+.mx_Pill {
+    background-color: var(--cpd-color-alpha-gray-700) !important;
+    &:hover {
+        background-color: var(--cpd-color-bg-action-primary-rest) !important;
+    }
+}
+.mx_Pill.mx_UserPill_me, .mx_Pill.mx_AtRoomPill {
+    background-color: var(--cpd-color-bg-action-primary-rest) !important;
+}
+
+.mx_RoomSummaryCard_container .mx_DecoratedRoomAvatar_icon {
+    right: 28.5% !important;
+}
+
+// square buttons
+.mx_AccessibleButton.mx_AccessibleButton_hasKind {
+    border-radius: 4px !important;
+}
+.mx_TabbedView_tabLabel {
+  border-radius: 8px !important;
+}
+
+.mx_Dialog button {
+    border-radius: 4px !important;
+}
+
+.mx_Dropdown_input, .mx_CopyableText.mx_CopyableText_border  {
+    border-radius: 4px !important;
+}
+
+.mx_Toast_buttons button{
+    border-radius: 4px !important;
+}
+
+// square fileds
+.mx_Field, .mx_Field input, .mx_Field select, .mx_Field textarea, .mx_Dropdown_input {
+      border-radius: 4px !important;
+}

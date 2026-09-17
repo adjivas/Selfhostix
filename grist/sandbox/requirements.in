@@ -1,0 +1,15 @@
+# python requirements,
+# From this, "./build python3" generates requirements.txt by running pip-compile.
+
+friendly-traceback
+openpyxl
+astroid
+roman
+chardet
+iso8601
+phonenumberslite
+python-dateutil
+sortedcontainers
+unittest-xml-reporting
+typing-extensions  # used by astroid before Python 3.11
+executing>=2.2.1  # indirect; must be recent enough to read Python 3.12+ bytecode

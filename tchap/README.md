@@ -1,0 +1,101 @@
+<p align="center">
+  <a href="https://github.com/tchapgouv">
+    <img alt="tchap-logo" src="./apps/web/res/themes/tchap/img/logos/tchap-logo.svg" width="300" />
+  </a>
+</p>
+
+<p align="center">
+  Bienvenue sur Tchap! Le système de messagerie instantanée du secteur public français
+</p>
+
+<p align="center">
+  <a href="https://tchap.numerique.gouv.fr">
+    Site web de présentation
+  </a> -
+  <a href="contact@tchap.beta.gouv.fr">
+    Contactez-nous
+  </a>
+</p>
+
+Tchap is a web app that allows you to chat through the matrix protocol for the French public service. It is a soft fork of [Element web](https://github.com/vector-im/element-web), we diverge only for specific requirements.
+
+## Config variables
+
+- tchap_features : Object containing the feature that can be activated by homeserver
+    - "feature_email_notification": Email notification
+    - "feature_space": Creation of spaces
+    - "feature_thread": Activate thread on messages
+    - "feature_audio_call": Activate 1 to 1 voice call
+    - "feature_video_call": Activate 1 to 1 video call
+    - "feature_video_group_call": Activate group call on rooms, for this feature to work, the values of `UIFeature.widgets` and `feature_group_calls` needs to be true
+    - "feature_screenshare_call": Activate 1 to 1 screenshare
+    - feature_create_room_non_encrypted : Activate option to create private non encrypted room
+    - feature_use_ec_in_dm: give options to use Element call in DM room
+    - feature_red_list: Activate the option for red list
+- tchap_desktop:
+    - "deep_link_scheme": Determine the value of the scheme depending on the environment, used by tchap-desktop
+
+## File structures
+- apps/web/modules -> used for translation, old element module system
+- patches_legacy -> legacy patches directory in which code for the patches where put
+- patches_tchap -> specific patches used by tchap (using patch package instead of pnpm system)
+- patches -> used by element code
+- apps/web/src -> Main source of the application
+- apps/web/src/tchap -> containing tchap custom react components
+- apps/web/res/css/tchap -> containing all tchap custom css
+- apps/web/res/themes/tchap-* -> tchap themes
+- apps/web/test/unit-tests/tchap -> tchap unit tests
+- 
+
+## Local dev installation
+
+```
+cd apps/web
+pnpm install
+pnpm start
+```
+
+## Dev guidelines
+
+### Making a change
+
+- In Element code (everything outside of tchap folders) :
+  You need to add around your code those comments
+
+```
+// :TCHAP: NAME_OF_THE_PATCH
+...code
+// end :TCHAP:
+```
+
+Then also update the `tchap-modifications.json` file. We continue to keep track of the changes we make to the sdk. It will also be easier to separate different functionnality that tchap added to the code
+
+### Compound Web tchap
+
+We use our own compound-web and compound-design-token packages. When upgrading the version, do not forget to also upgrade compoound-web-tchap npm package.
+The reference to `@vector-im/compound-web` are still present, but it is only an alias to our package `compound-design-tchap` defined in webpack. The only direct reference to this package is in the css import of `_common.pcss`, because the pcss loader doesnt manage aliases.
+
+### Tests
+
+- Now that `matrix-react-sdk` is merged inside tchap-web, we only target the `test/tchap` folder in order to run our tests on only the files that tchap has modified.
+- For every modification, we need to copy the existing test (if there is one) of the component, move it to tchap folder and modify it accordingly.
+- This project is tested with BrowserStack.
+
+## Copyright & License
+
+Copyright (c) 2014-2017 OpenMarket Ltd
+Copyright (c) 2017 Vector Creations Ltd
+Copyright (c) 2017-2025 New Vector Ltd
+2024-2025, Direction interministérielle du numérique
+
+This software is multi licensed by New Vector Ltd (Element). It can be used either:
+
+(1) for free under the terms of the GNU Affero General Public License (as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version); OR
+
+(2) for free under the terms of the GNU General Public License (as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version); OR
+
+(3) under the terms of a paid-for Element Commercial License agreement between you and Element (the terms of which may vary depending on what you and Element have agreed to).
+Unless required by applicable law or agreed to in writing, software distributed under the Licenses is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the Licenses for the specific language governing permissions and limitations under the Licenses.
+
+Please contact [licensing@element.io](mailto:licensing@element.io) to purchase
+an Element commercial license for this software.

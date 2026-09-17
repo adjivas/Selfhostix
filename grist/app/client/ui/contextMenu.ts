@@ -1,0 +1,126 @@
+/**
+ * This module implements context menu to be shown on contextmenu event (most commonly associated
+ * with right+click, but could varies slightly depending on platform, ie: mac support ctrl+click as
+ * well).
+ *
+ * To prevent the default context menu to show everywhere else (including on the top of your custom
+ * context menu) dont forget to prevent it by including below line at the root of the dom:
+ *   `dom.on('contextmenu', ev => ev.preventDefault())`
+ */
+import { cssMenuElem, registerMenuOpen } from "app/client/ui2018/menus";
+
+import { Disposable, dom, DomArg, DomContents, Holder } from "grainjs";
+import { IMenuOptions, IOpenController, Menu } from "popweasel";
+
+export type IContextMenuContentFunc = (ctx: ContextMenuController) => DomContents;
+
+interface ContextMenuControllerOptions {
+  triggerElem: Element;
+  menuOptions?: IMenuOptions;
+}
+
+class ContextMenuController extends Disposable implements IOpenController {
+  private _content: HTMLElement;
+  private _triggerElem = this._options.triggerElem;
+
+  constructor(
+    private _event: MouseEvent,
+    contentFunc: IContextMenuContentFunc,
+    private _options: ContextMenuControllerOptions,
+  ) {
+    super();
+
+    const menu = Menu.create(null, this, [contentFunc(this)], {
+      menuCssClass: cssMenuElem.className + " grist-floating-menu",
+      ...this._options.menuOptions,
+    });
+    const content = this._content = menu.content;
+
+    // Position synchronously: _updatePosition() triggers a DOM reflow with getBoundingClientRect()
+    // and sets position synchronously, before a paint. (Previously, code used visibility:hidden
+    // and positioned after setTimeout, which made it hard wait for the menu in tests.)
+    document.body.appendChild(content);
+    this._updatePosition();
+
+    // Prevents arrow to move the cursor while menu is open.
+    dom.onKeyElem(content, "keydown", {
+      ArrowLeft: ev => ev.stopPropagation(),
+      ArrowRight: ev => ev.stopPropagation(),
+      // UP and DOWN are already handle by the menu to navigate the menu)
+    });
+
+    // On click anywhere on the page (outside popup content), close it.
+    const onClick = (evt: MouseEvent) => {
+      if (evt.target && !content.contains(evt.target as Node)) {
+        this.close();
+      }
+    };
+    // Handle the specific case if right-clicking/pressing the Menu key inside the menu itself (we ignore it)
+    const onContextMenu = (evt: MouseEvent) => {
+      if (evt.target && content.contains(evt.target as Node)) {
+        evt.preventDefault();
+        evt.stopPropagation();
+        return;
+      }
+      onClick(evt);
+    };
+    this.autoDispose(dom.onElem(document, "click", onClick, { useCapture: true }));
+    this.autoDispose(dom.onElem(document, "contextmenu", onContextMenu, { useCapture: true }));
+
+    // Cleanup involves removing the element.
+    this.onDispose(() => {
+      dom.domDispose(content);
+      content.remove();
+    });
+
+    registerMenuOpen(this);
+  }
+
+  public close() {
+    this.dispose();
+  }
+
+  public setOpenClass(elem: Element, cls: string = "weasel-popup-open") {
+    elem.classList.add(cls);
+    this.onDispose(() => elem.classList.remove(cls));
+  }
+
+  public getTriggerElem() {
+    return this._triggerElem;
+  }
+
+  public update() {}
+
+  private _updatePosition() {
+    const content = this._content;
+    const ev = this._event;
+    const rect = content.getBoundingClientRect();
+    // position menu on the right of the cursor if it can fit, on the left otherwise
+    content.style.left = ((ev.pageX + rect.width < window.innerWidth) ?
+      ev.pageX :
+      Math.max(ev.pageX - rect.width, 0)) + "px";
+    // position menu below the cursor if it can fit, otherwise fit at the bottom of the screen
+    content.style.bottom = Math.max(window.innerHeight - (ev.pageY + rect.height), 0) + "px";
+  }
+}
+
+/**
+ * Show a context menu on contextmenu.
+ */
+export function contextMenu(
+  contentFunc: IContextMenuContentFunc,
+  options: IMenuOptions = {},
+): DomArg {
+  return (elem) => {
+    const holder = Holder.create(null);
+    dom.autoDisposeElem(elem, holder);
+    dom.onElem(elem, "contextmenu", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      ContextMenuController.create(holder, ev, contentFunc, {
+        triggerElem: elem as Element,
+        menuOptions: options,
+      });
+    });
+  };
+}

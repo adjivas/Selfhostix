@@ -1,0 +1,131 @@
+/* override components style
+/* better that it be loaded after matrix-react-sdk/res/css/_components.pcss */
+/* example of how to override a style
+.mx_NewRoomIntro > h2 {
+    margin-top: 24px;
+    font-size: 2.4rem;
+    font-weight: 600;
+    color: red; //<- new attribute
+} */
+
+$color_1: #2e2f32;
+$color_2: white;
+$color_3: #68707d;
+$hover: #f4f6fa;
+$background-color_1: var(--cpd-color-bg-action-primary-rest);
+$background-color_2: transparent;
+$background-color_4: #c7d5e4;
+
+/* sometimes its red due to tchap red badge icon, so we force the green on the e2e verified color */
+$e2e-verified-color: var(--confirmation-color);
+
+.mx_EventTile_highlight {
+    color: $color_1;
+}
+.mx_EventTile[data-layout="bubble"].mx_EventTile_highlight {
+    &:before {
+        background-color: $background-color_2;
+    }
+}
+
+.mx_RoomView_body[data-layout="bubble"] {
+    .mx_MessageComposer {
+        width: 100%;
+        max-width: 1300px;
+        margin: 0 auto;
+    }
+    .mx_RoomView_statusArea {
+        width: 100%;
+        max-width: 1300px;
+        margin: 0 auto;
+    }
+    .mx_RoomView_timeline {
+        width: 100%;
+        max-width: 1300px;
+        margin: 0 auto;
+    }
+}
+.mx_RoomListHeader {
+    .mx_RoomListHeader_contextMenuButton {
+        &:hover {
+            background-color: $background-color_4;
+        }
+    }
+}
+.mx_RoomHeader_name {
+    &:hover {
+        background-color: $background-color_4;
+    }
+}
+.mx_EventTile.mx_EventTile_highlight {
+    color: $background-color_1;
+    font-weight: 500;
+
+    .markdown-body {
+        color: $color_3;
+    }
+}
+.mx_EventTile.mx_EventTile_highlight .markdown-body, .mx_EventTile.mx_EventTile_highlight .mx_EventTile_edited {
+    color: var(--timeline-text-color);
+    font-weight: 400;
+}
+
+.mx_BaseAvatar.mx_RoomAvatar_isSpaceRoom .mx_BaseAvatar_image, .mx_BaseAvatar.mx_RoomAvatar_isSpaceRoom.mx_BaseAvatar_image, .mx_SpaceButton_avatarWrapper .mx_BaseAvatar span.mx_BaseAvatar_initial, .mx_SpaceButton_icon {
+    border: 1px solid #c1c9d6;
+}
+/* .mx_AccessibleButton.mx_NotificationBadge.mx_NotificationBadge_visible.mx_NotificationBadge_dot {
+    background: $color_2;
+} */
+.mx_SpaceRoomView_landing .mx_SpaceHierarchy_list li.mx_SpaceHierarchy_roomTileWrapper .mx_SpaceHierarchy_roomTile:focus-within, .mx_SpaceRoomView_landing .mx_SpaceHierarchy_list li.mx_SpaceHierarchy_roomTileWrapper .mx_SpaceHierarchy_roomTile:hover {
+    background-color: $hover;
+}
+
+.mx_ForwardDialog>.mx_ForwardList .mx_ForwardList_results .mx_ForwardList_entry:hover {
+    background-color: $hover;
+}
+
+/* Dialog encryption secure storage back buttton no background color*/
+.mx_AccessSecretStorageDialog .mx_Dialog_buttons button.warning {
+    background-color: transparent !important;
+}
+
+.mx_QuickSettingsButton svg{
+    fill: $background-color_1;
+    color: $background-color_1;
+    
+}
+
+.mx_ThreadsActivityCentreButton .mx_ThreadsActivityCentreButton_Icon {
+    fill: $background-color_1;
+}
+
+/* The background color of the thread container */
+.mx_ThreadSummary {
+    background-color: var(--cpd-color-gray-400);
+    border: none;
+}
+
+/* The icons by default takes compound-tertiary color which is blue in our cases */
+/* There are some icons that we dont want to be this blue */
+.mx_EventTile_e2eIcon.mx_EventTile_e2eIcon_normal,
+.mx_EventTile_e2eIcon.mx_EventTile_e2eIcon_decryption_failure {
+    &::after {
+        background-color: var(--cpd-color-icon-secondary);
+    }
+}
+
+.mx_ThreadSummary > div:first-child {
+    color: var(--cpd-color-icon-secondary);
+}
+
+.mx_ThreadSummary_chevron {
+    background: linear-gradient(270deg,  var(--cpd-color-gray-400) 50%, $system-transparent 100%) !important;
+}
+
+._badge_10dml_8 {
+    min-block-size: 16px;
+}
+
+._roomListItem_rtaba_8 {
+    color: var(--cpd-color-text-primary);
+}

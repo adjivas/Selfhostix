@@ -1,0 +1,91 @@
+import { addSaveInterface, KoSaveableObservable, objObservable } from "app/client/models/modelUtil";
+import { DocSettingsPage } from "app/client/ui/DocumentSettings";
+import { testId } from "app/client/ui2018/cssVars";
+import { ColValues } from "app/common/DocActions";
+import { DocumentSettings } from "app/common/DocumentSettings";
+import { initGristStyles } from "test/fixtures/projects/helpers/gristStyles";
+import { withLocale } from "test/fixtures/projects/helpers/withLocale";
+
+import { Computed, dom, fromKo, input, observable, Observable, styled } from "grainjs";
+import * as ko from "knockout";
+
+function savable<T>(initial: T) {
+  async function save(value: T) {
+    result(value);
+  }
+  const result = addSaveInterface(ko.observable<T>(initial), save);
+  return result;
+}
+
+function setupTest() {
+  const timezone = savable("");
+  const documentSettingsJson: KoSaveableObservable<DocumentSettings> = objObservable(savable<DocumentSettings>({
+    locale: "en-US",
+  }));
+  const docInfo = {
+    timezone,
+    documentSettingsJson,
+    updateColValues: async function({ timezone: newTimezone, documentSettings }: ColValues): Promise<void> {
+      await timezone.saveOnly(String(newTimezone));
+      await documentSettingsJson.saveOnly(JSON.parse(String(documentSettings)));
+    },
+  };
+  const docPageModel = {
+    currentDocId: Observable.create(null, "docId"),
+    currentDoc: Observable.create(null, { access: "owners" }),
+    type: Observable.create(null, null),
+    isFork: Observable.create(null, false),
+  };
+  const gristDoc: any = {
+    docInfo,
+    docPageModel,
+    // Minimal stub: with no signed-in user the Notifications/Automations nudge no-ops,
+    // keeping this fixture focused on the settings rows it actually exercises.
+    appModel: { currentValidUser: null },
+    isTimingOn: observable(false),
+    attachmentTransfer: observable(null),
+    docApi: {
+      getAttachmentTransferStatus: async () => undefined,
+      getAttachmentStores: async () => [],
+      transferAllAttachments: async () => undefined,
+    },
+  };
+
+  const locale = Computed.create(null, fromKo(documentSettingsJson),
+    (_use, settings) => settings.locale);
+  const currency = Computed.create(null, fromKo(documentSettingsJson),
+    (_use, settings) => String(settings.currency));
+
+  return [
+    testBox(
+      dom("div", "Document Settings"),
+      dom.create(DocSettingsPage, gristDoc),
+    ),
+    testBox(
+      dom("div", "Timezone Value"),
+      dom("div", input(fromKo(timezone), {}, testId("result-timezone"))),
+    ),
+    testBox(
+      dom("div", "Locale Value"),
+      dom("div", input(locale, {}, testId("result-locale"))),
+    ),
+    testBox(
+      dom("div", "Currency Value"),
+      dom("div", input(currency, {}, testId("result-currency"))),
+    ),
+  ];
+}
+
+const testBox = styled("div", `
+  float: left;
+  width: 25rem;
+  font-family: sans-serif;
+  font-size: 1rem;
+  box-shadow: 1px 1px 4px 2px #AAA;
+  padding: 1rem;
+  margin: 1rem;
+  & > div { margin: 1rem; }
+`);
+
+initGristStyles();
+void withLocale(() => dom.update(document.body, setupTest()));

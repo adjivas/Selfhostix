@@ -1,0 +1,204 @@
+import { DBSchema, IDBPDatabase, deleteDB, openDB } from 'idb';
+
+import { Doc, DocsResponse } from '@/docs/doc-management';
+
+import { RequestData, RequestSerializer } from './RequestSerializer';
+
+import pkg from '@/../package.json';
+
+export type DBRequest = {
+  requestData: RequestData;
+  key: string;
+};
+
+export interface DocContentCacheEntry {
+  etag: string;
+  lastModified: string;
+  content: string;
+}
+
+interface IDocsDB extends DBSchema {
+  'doc-list': {
+    key: string;
+    value: DocsResponse;
+  };
+  'doc-item': {
+    key: string;
+    value: Doc;
+  };
+  'doc-mutation': {
+    key: string;
+    value: DBRequest;
+  };
+  'doc-version': {
+    key: 'version';
+    value: number;
+  };
+  'doc-content': {
+    key: string;
+    value: DocContentCacheEntry;
+  };
+}
+
+type TableName = 'doc-list' | 'doc-item' | 'doc-mutation' | 'doc-content';
+
+/**
+ * IndexDB prefers incremental versioning when upgrading the database,
+ * otherwise it may throw an error, and we need to destroy the database
+ * and recreate it.
+ * To calculate the version number, we use the following formula,
+ * assuring incremental versioning:
+ *   version = major * 1000000 + minor * 1000 + patch
+ * ex:
+ *  - version 1.2.3 => 1002003
+ *  - version 0.10.15 => 10015
+ *  - version 2.0.0 => 2000000
+ * @returns number
+ */
+export const getCurrentVersion = () => {
+  const [major, minor, patch] = pkg.version.split('.').map(Number);
+  return major * 1000000 + minor * 1000 + patch;
+};
+
+/**
+ * Static class for managing the Docs with IndexedDB.
+ */
+export class DocsDB {
+  private static readonly DBNAME = 'api-docs-db';
+
+  /**
+   * IndexedDB instance.
+   * @returns Promise<IDBPDatabase<DocsDB>>
+   */
+  public static open = async () => {
+    let db: IDBPDatabase<IDocsDB>;
+
+    try {
+      db = await openDB<IDocsDB>(DocsDB.DBNAME, getCurrentVersion(), {
+        upgrade(db) {
+          if (!db.objectStoreNames.contains('doc-list')) {
+            db.createObjectStore('doc-list');
+          }
+          if (!db.objectStoreNames.contains('doc-item')) {
+            db.createObjectStore('doc-item');
+          }
+          if (!db.objectStoreNames.contains('doc-mutation')) {
+            db.createObjectStore('doc-mutation');
+          }
+          if (!db.objectStoreNames.contains('doc-version')) {
+            db.createObjectStore('doc-version');
+          }
+          if (!db.objectStoreNames.contains('doc-content')) {
+            db.createObjectStore('doc-content');
+          }
+        },
+      });
+    } catch (error) {
+      /**
+       * If for any reason the current version is lower than the previous one,
+       * we need to delete the database and create a new one.
+       */
+      console.error('SW: Failed to open IndexedDB', error);
+      await deleteDB(DocsDB.DBNAME);
+
+      db = await DocsDB.open();
+    }
+
+    return db;
+  };
+
+  public static deleteAll = async (tableName: TableName) => {
+    const db = await DocsDB.open();
+    const keys = await db.getAllKeys(tableName);
+
+    for (const key of keys) {
+      await db.delete(tableName, key);
+    }
+
+    db.close();
+  };
+
+  public static cleanupOutdatedVersion = async () => {
+    const db = await DocsDB.open();
+    const version = await db.get('doc-version', 'version');
+    const currentVersion = getCurrentVersion();
+
+    if (version != currentVersion) {
+      console.debug('SW: Cleaning up outdated caches', version, currentVersion);
+
+      await DocsDB.deleteAll('doc-item');
+      await DocsDB.deleteAll('doc-list');
+      await DocsDB.deleteAll('doc-mutation');
+      await db.put('doc-version', currentVersion, 'version');
+    }
+
+    db.close();
+  };
+
+  /**
+   * Save the response in the IndexedDB.
+   */
+  public static async cacheResponse(
+    key: string,
+    body: DocsResponse | Doc | DBRequest | DocContentCacheEntry,
+    tableName: TableName,
+    isRetry = false,
+  ): Promise<void> {
+    const db = await DocsDB.open();
+
+    try {
+      await db.put(tableName, body, key);
+    } catch (error) {
+      db.close();
+      // If the store is missing and we haven't retried yet, reset the DB once
+      // (handles a PR that added a store without a version bump).
+      // The isRetry guard prevents an infinite loop if the store name is invalid.
+      if (!isRetry && !db.objectStoreNames.contains(tableName)) {
+        console.warn(
+          'SW: Missing object store, resetting IndexedDB and retrying',
+          tableName,
+        );
+        await deleteDB(DocsDB.DBNAME);
+        await DocsDB.cacheResponse(key, body, tableName, true);
+      } else {
+        console.error(
+          'SW: Failed to save response in IndexedDB',
+          error,
+          key,
+          body,
+        );
+      }
+      return;
+    }
+
+    db.close();
+  }
+
+  public static hasSyncToDo = async () => {
+    const db = await DocsDB.open();
+    const requests = await db.getAll('doc-mutation');
+    db.close();
+
+    return requests.length > 0;
+  };
+
+  /**
+   * Sync the queue with the server.
+   */
+  public static sync = async () => {
+    const db = await DocsDB.open();
+    const requests = await db.getAll('doc-mutation');
+
+    for (const request of requests) {
+      try {
+        await fetch(new RequestSerializer(request.requestData).toRequest());
+        await db.delete('doc-mutation', request.key);
+      } catch (error) {
+        console.error('SW: Replay failed for request', request, error);
+        break;
+      }
+    }
+
+    db.close();
+  };
+}

@@ -1,0 +1,39 @@
+import { TreeItem } from "@/features/drivers/types";
+import { useTreeContext } from "@gouvfr-lasuite/ui-components";
+import { useRouter } from "next/router";
+import { useGlobalExplorer } from "../../GlobalExplorerContext";
+
+type ExplorerTreeNavItemProps = {
+  icon: React.ReactNode;
+  label: string;
+  route: string;
+};
+
+export const ExplorerTreeNavItem = ({
+  icon,
+  label,
+  route,
+}: ExplorerTreeNavItemProps) => {
+  const { setIsLeftPanelOpen } = useGlobalExplorer();
+  const treeContext = useTreeContext<TreeItem>();
+  const router = useRouter();
+  const isActive = router.pathname === route;
+
+  const handleClick = () => {
+    router.push(route);
+    treeContext?.treeData?.setSelectedNode(undefined);
+    setIsLeftPanelOpen(false);
+  };
+
+  return (
+    <div
+      className={`explorer__tree__nav__item ${isActive ? "active" : ""}`}
+      onClick={handleClick}
+      aria-label={label}
+      role="link"
+    >
+      <div className="explorer__tree__nav__item__icon">{icon}</div>
+      <div className="explorer__tree__nav__item__label">{label}</div>
+    </div>
+  );
+};

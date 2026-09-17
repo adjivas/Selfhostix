@@ -1,0 +1,546 @@
+import { TelemetryLevel } from "app/common/Telemetry";
+import {
+  clickSwitch, currentVersion, isEnabled, itemValue, switchElement, toggleItem, withExpandedItem,
+} from "test/nbrowser/AdminPanelTools";
+import * as gu from "test/nbrowser/gristUtils";
+import { useFastSandboxProbe } from "test/nbrowser/sandboxProbeFixture";
+import { server, setupTestSuite } from "test/nbrowser/testUtils";
+import { FakeUpdateServer, startFakeUpdateServer } from "test/server/customUtil";
+import * as testUtils from "test/server/testUtils";
+
+import { assert, driver, Key } from "mocha-webdriver";
+
+describe("AdminPanel", function() {
+  this.timeout(300000);
+  setupTestSuite();
+
+  let oldEnv: testUtils.EnvironmentSnapshot;
+  let session: gu.Session;
+  let fakeServer: FakeUpdateServer;
+
+  afterEach(() => gu.checkForErrors());
+
+  before(async function() {
+    oldEnv = new testUtils.EnvironmentSnapshot();
+    process.env.GRIST_TEST_SERVER_DEPLOYMENT_TYPE = "core";
+    process.env.GRIST_ALLOW_AUTOMATIC_VERSION_CHECKING = "true";
+    // Set admin email, but make it non-canonical casing as an extra test.
+    process.env.GRIST_DEFAULT_EMAIL = gu.session().email.toUpperCase();
+    // The real sandbox-providers probe takes ~5s on machines without runsc,
+    // and lands inside waitForServer's 5s budget after a page reload.
+    useFastSandboxProbe();
+    fakeServer = await startFakeUpdateServer();
+    process.env.GRIST_TEST_VERSION_CHECK_URL = `${fakeServer.url()}/version`;
+    await server.restart(true);
+  });
+
+  after(async function() {
+    await fakeServer.close();
+    oldEnv.restore();
+    await server.restart(true);
+  });
+
+  it("should show an explanation to non-managers", async function() {
+    session = await gu.session().user("user2").personalSite.login();
+    await session.loadDocMenu("/");
+
+    await gu.openAccountMenu();
+    assert.equal(await driver.find(".test-usermenu-admin-panel").isPresent(), false);
+    await driver.sendKeys(Key.ESCAPE);
+    assert.equal(await driver.find(".test-dm-admin-panel").isPresent(), false);
+
+    // Try loading the URL directly.
+    await driver.get(`${server.getHost()}/admin`);
+    await gu.waitForAdminPanel();
+    assert.equal(await driver.find(".test-admin-panel").isDisplayed(), true);
+    assert.match(await driver.find(".test-admin-panel").getText(), /Administrator Panel Unavailable/);
+  });
+
+  it("should be shown to managers", async function() {
+    session = await gu.session().personalSite.login();
+    await session.loadDocMenu("/");
+    assert.equal(await driver.find(".test-dm-admin-panel").isDisplayed(), true);
+    assert.match(await driver.find(".test-dm-admin-panel").getAttribute("href"), /\/admin$/);
+    await gu.openAccountMenu();
+    assert.equal(await driver.find(".test-usermenu-admin-panel").isDisplayed(), true);
+    assert.match(await driver.find(".test-usermenu-admin-panel").getAttribute("href"), /\/admin$/);
+    await driver.find(".test-usermenu-admin-panel").click();
+    await gu.waitForAdminPanel();
+    assert.equal(await driver.find(".test-admin-panel").isDisplayed(), true);
+  });
+
+  it("shows and clears setup requests from users", async function() {
+    session = await gu.session().personalSite.login();
+    await driver.get(`${server.getHost()}/admin`);
+    await gu.waitForAdminPanel();
+    // No requests yet, so the item is absent entirely.
+    assert.isFalse(await driver.find(".test-admin-panel-item-setup-requests").isPresent());
+
+    // A signed-in user asks for a setup step. This is the same POST the "Ask the admin"
+    // button in the Document Settings nudge makes.
+    const status = await driver.executeAsyncScript(
+      "const done = arguments[arguments.length - 1];" +
+      // Target the home URL, not the page origin: in a multi-server topology the admin page and
+      // the API can live on different servers (this is the base the real button uses too).
+      "const base = (window.gristConfig && window.gristConfig.homeUrl || '').replace(/\\/$/, '');" +
+      "fetch(base + '/api/setup-requests', {" +
+      "  method: 'POST', headers: {'Content-Type': 'application/json'}," +
+      "  body: JSON.stringify({step: 'email', features: ['notifications'], reason: 'please'})," +
+      "}).then(r => done(r.status), e => done(String(e)));");
+    assert.equal(status, 200);
+
+    await driver.navigate().refresh();
+    await gu.waitForAdminPanel();
+    await driver.findWait(".test-admin-panel-item-setup-requests", 2000);
+    assert.equal(await itemValue("setup-requests"), "1 request");
+    await toggleItem("setup-requests");
+    const block = await driver.find(".test-admin-setup-requests-step-email");
+    const blockText = await block.getAttribute("textContent");
+    assert.match(blockText, /Connect email delivery/);
+    assert.match(blockText, /1 request/);
+    assert.match(blockText, /For Change & comment notifications \(1\)/);
+    // (The requester's name is "You" here, an artifact of the test server's minimal
+    // login system; the email is the meaningful part.)
+    assert.match(blockText, /<gristoid\+chimpy@gmail\.com>/);
+    assert.match(blockText, /“please”/);
+
+    // Clear the step; the item disappears (and stays gone for later tests).
+    await block.find(".test-admin-setup-requests-clear").click();
+    await gu.waitToPass(async () => {
+      assert.isFalse(await driver.find(".test-admin-panel-item-setup-requests").isPresent());
+    });
+  });
+
+  it("opens the change-admin modal when no getgrist provider is configured", async function() {
+    session = await gu.session().personalSite.login();
+    await driver.get(`${server.getHost()}/admin`);
+    await gu.waitForAdminPanel();
+    await toggleItem("authentication");
+    await driver.findWait(".test-admin-auth-change-admin", 2000).click();
+    await driver.findWait(".test-modal-dialog", 2000);
+    await driver.sendKeys(Key.ESCAPE);
+  });
+
+  it("should include support-grist section", async function() {
+    assert.match(
+      await driver.findWait(".test-admin-panel-item-sponsor", 3000).getText(),
+      /Support Grist Labs on GitHub/,
+    );
+    await withExpandedItem("sponsor", async () => {
+      const button = await driver.find(".test-support-grist-page-sponsorship-section");
+      assert.equal(await button.isDisplayed(), true);
+      assert.match(await button.getText(), /You can support Grist open-source/);
+    });
+  });
+
+  it("supports opting in to telemetry from the page", async function() {
+    await assertTelemetryLevel("off");
+
+    let toggle = await switchElement("telemetry");
+    assert.equal(await isEnabled(toggle), false);
+
+    await withExpandedItem("telemetry", async () => {
+      assert.isFalse(await driver.find(".test-support-grist-page-telemetry-section-message").isPresent());
+      await driver.findContentWait(
+        ".test-support-grist-page-telemetry-section button", /Opt in to Telemetry/, 2000).click();
+      await driver.findContentWait(".test-support-grist-page-telemetry-section button", /Opt out of Telemetry/, 2000);
+      assert.equal(
+        await driver.find(".test-support-grist-page-telemetry-section-message").getText(),
+        "You have opted in to telemetry. Thank you! 🙏",
+      );
+      assert.equal(await isEnabled(toggle), true);
+    });
+
+    // Check it's still on after collapsing.
+    assert.equal(await isEnabled(toggle), true);
+
+    // Reload the page and check that the Grist config indicates telemetry is set to "limited".
+    await driver.navigate().refresh();
+    await gu.waitForAdminPanel();
+    toggle = await switchElement("telemetry");
+    assert.equal(await isEnabled(toggle), true);
+    await toggleItem("telemetry");
+    await driver.findContentWait(".test-support-grist-page-telemetry-section button", /Opt out of Telemetry/, 2000);
+    assert.equal(
+      await driver.findWait(".test-support-grist-page-telemetry-section-message", 2000).getText(),
+      "You have opted in to telemetry. Thank you! 🙏",
+    );
+    await assertTelemetryLevel("limited");
+  });
+
+  it("supports opting out of telemetry from the page", async function() {
+    await driver.findContent(".test-support-grist-page-telemetry-section button", /Opt out of Telemetry/).click();
+    await driver.findContentWait(".test-support-grist-page-telemetry-section button", /Opt in to Telemetry/, 2000);
+    assert.isFalse(await driver.find(".test-support-grist-page-telemetry-section-message").isPresent());
+    let toggle = await switchElement("telemetry");
+    assert.equal(await isEnabled(toggle), false);
+
+    // Reload the page and check that the Grist config indicates telemetry is set to "off".
+    await driver.navigate().refresh();
+    await gu.waitForAdminPanel();
+    await toggleItem("telemetry");
+    await driver.findContentWait(".test-support-grist-page-telemetry-section button", /Opt in to Telemetry/, 2000);
+    assert.isFalse(await driver.find(".test-support-grist-page-telemetry-section-message").isPresent());
+    await assertTelemetryLevel("off");
+    toggle = await switchElement("telemetry");
+    assert.equal(await isEnabled(toggle), false);
+  });
+
+  it("supports toggling telemetry from the toggle in the top line", async function() {
+    // Look up by name each time: the panel re-renders as the value settles, which can leave a
+    // held element stale or hidden.
+    assert.equal(await isEnabled("telemetry"), false);
+    await clickSwitch("telemetry");
+    assert.equal(await isEnabled("telemetry"), true);
+    assert.match(await driver.find(".test-support-grist-page-telemetry-section-message").getText(),
+      /You have opted in/);
+    await clickSwitch("telemetry");
+    assert.equal(await isEnabled("telemetry"), false);
+    await withExpandedItem("telemetry", async () => {
+      assert.equal(await driver.find(".test-support-grist-page-telemetry-section-message").isPresent(), false);
+    });
+  });
+
+  it("shows telemetry opt-in status even when set via environment variable", async function() {
+    // Set the telemetry level to "limited" via environment variable and restart the server.
+    process.env.GRIST_TELEMETRY_LEVEL = "limited";
+    await server.restart();
+
+    // Check that the Support Grist page reports telemetry is enabled.
+    await driver.get(`${server.getHost()}/admin`);
+    await gu.waitForAdminPanel();
+    const toggle = await switchElement("telemetry");
+    assert.equal(await isEnabled(toggle), true);
+    await toggleItem("telemetry");
+    assert.equal(
+      await driver.findWait(".test-support-grist-page-telemetry-section-message", 2000).getText(),
+      "You have opted in to telemetry. Thank you! 🙏",
+    );
+    assert.isFalse(await driver.findContent(".test-support-grist-page-telemetry-section button",
+      /Opt out of Telemetry/).isPresent());
+
+    // Now set the telemetry level to "off" and restart the server.
+    process.env.GRIST_TELEMETRY_LEVEL = "off";
+    await server.restart();
+
+    // Check that the Support Grist page reports telemetry is disabled.
+    await driver.get(`${server.getHost()}/admin`);
+    await gu.waitForAdminPanel();
+    await toggleItem("telemetry");
+    assert.equal(
+      await driver.findWait(".test-support-grist-page-telemetry-section-message", 2000).getText(),
+      "You have opted out of telemetry.",
+    );
+    assert.isFalse(await driver.findContent(".test-support-grist-page-telemetry-section button",
+      /Opt in to Telemetry/).isPresent());
+  });
+
+  it("should show version", async function() {
+    await driver.get(`${server.getHost()}/admin`);
+    await gu.waitForAdminPanel();
+    // Build-time constant, rendered with the panel; nothing to wait for.
+    assert.equal(await driver.find(".test-admin-panel-item-version").isDisplayed(), true);
+    assert.match(await driver.find(".test-admin-panel-item-value-version").getText(), /^Version \d+\./);
+  });
+
+  it("should show admin accounts", async function() {
+    await driver.get(`${server.getHost()}/admin`);
+    await gu.waitForAdminPanel();
+    const adminAccounts = await driver.findWait(".test-admin-panel-item-admins", 2000);
+    assert.equal(await adminAccounts.isDisplayed(), true);
+    const adminDisplay = await driver.find(".test-admin-panel-admin-accounts-display");
+
+    // The count comes from the "admins" probe; the item renders "checking" until it reports.
+    await gu.waitForAdminChecks();
+    assert.equal("1 admin account", await adminDisplay.getText());
+
+    await toggleItem("admins");
+
+    const adminsList = await driver.find(".test-admin-panel-admin-accounts-list");
+    assert.equal(await adminsList.isDisplayed(), true);
+
+    const names = await adminAccounts.findAll(".test-admin-panel-admin-account-name");
+    assert.equal(names.length, 1);
+
+    const emails = await adminAccounts.findAll(".test-admin-panel-admin-account-email");
+    assert.equal(names.length, 1);
+
+    assert.equal(await emails[0].getText(), gu.session().email);
+  });
+
+  it("should show sandbox", async function() {
+    await driver.get(`${server.getHost()}/admin`);
+    await gu.waitForAdminPanel();
+    assert.equal(await driver.find(".test-admin-panel-item-sandboxing").isDisplayed(), true);
+    await gu.waitForAdminChecks();
+    // unknown for grist-saas, unconfigured for grist-core.
+    assert.match(await driver.find(".test-admin-panel-item-value-sandboxing").getText(),
+      /^((Error: unknown)|(unconfigured))/);
+    // It would be good to test other scenarios, but we are using
+    // a multi-server setup on grist-saas and the sandbox test isn't
+    // useful there yet.
+
+    // Expanding the row shows the sandbox selection section (and not the
+    // "probe not available" race error it once hit when constructed before
+    // the panel's probe list loaded).
+    await driver.find(".test-admin-panel-item-name-sandboxing").click();
+    await gu.waitToPass(async () => {
+      assert.isTrue(await driver.find(".test-sandbox-section-flavor-0").isDisplayed());
+    }, 8000);
+  });
+
+  it("should show various self checks", async function() {
+    await driver.get(`${server.getHost()}/admin`);
+    await gu.waitForAdminPanel();
+    // Retry find+isDisplayed together: probe rows re-render as results land.
+    await gu.waitToPass(
+      async () => assert.equal(
+        await driver.find(".test-admin-panel-item-name-probe-system-user").isDisplayed(), true),
+      3000,
+    );
+    await gu.waitForAdminChecks();
+    assert.match(await driver.find(".test-admin-panel-item-value-probe-system-user").getText(), /✅/);
+  });
+
+  const upperCheckNow = () => driver.find(".test-admin-panel-updates-upper-check-now");
+  const lowerCheckNow = () => driver.find(".test-admin-panel-updates-lower-check-now");
+  const autoCheckToggle = () => driver.find(".test-admin-panel-updates-auto-check");
+  const autoCheckToggleDisabled = () => driver.find(".test-admin-panel-updates-auto-check-disabled");
+  const updateMessage = () => driver.find(".test-admin-panel-updates-message");
+  const versionBox = () => driver.find(".test-admin-panel-updates-version");
+  function waitForStatus(message: RegExp) {
+    return gu.waitToPass(async () => {
+      assert.match(await updateMessage().getText(), message);
+    });
+  }
+
+  it("should check for updates", async function() {
+    // Clear any cached settings.
+    await driver.executeScript("window.sessionStorage.clear(); window.localStorage.clear();");
+    await driver.navigate().refresh();
+    await gu.waitForAdminPanel();
+
+    // By default don't have any info.
+    await waitForStatus(/No information available/);
+
+    // We see upper check-now button.
+    assert.isTrue(await upperCheckNow().isDisplayed());
+
+    // We can expand.
+    await toggleItem("updates");
+
+    // We see a toggle to update automatically, enabled by default
+    assert.isTrue(await autoCheckToggle().isDisplayed());
+    assert.isTrue(await isEnabled(autoCheckToggle()));
+
+    // We can click it twice, Grist will do a check right away.
+    fakeServer.pause();
+    await autoCheckToggle().click();
+    assert.isFalse(await isEnabled(autoCheckToggle()));
+    await autoCheckToggle().click();
+    assert.isTrue(await isEnabled(autoCheckToggle()));
+
+    // It will first show "Checking for updates" message.
+    // (Request is blocked by fake server, so it will not complete until we resume it.)
+    await waitForStatus(/Checking for updates/);
+
+    // Upper check now button is removed.
+    assert.isFalse(await upperCheckNow().isPresent());
+
+    // Resume server and respond.
+    fakeServer.resume();
+
+    // It will show "New version available" message.
+    await waitForStatus(/Newer version available/);
+    // And a version number.
+    assert.isTrue(await versionBox().isDisplayed());
+    assert.match(await versionBox().getText(), new RegExp(`Version ${fakeServer.latestVersion}`));
+
+    // Disable auto-checks.
+    assert.isTrue(await isEnabled(autoCheckToggle()));
+    await autoCheckToggle().click();
+    assert.isFalse(await isEnabled(autoCheckToggle()));
+    // We remember that a newer version is available
+    await waitForStatus(/Newer version available/);
+    assert.isTrue(await versionBox().isDisplayed());
+    assert.equal(await versionBox().getText(), `Version ${fakeServer.latestVersion}`);
+
+    // Refresh to see if we are disabled.
+    fakeServer.pause();
+    await driver.navigate().refresh();
+    await gu.waitForAdminPanel();
+    await waitForStatus(/Newer version available/);
+    fakeServer.resume();
+    // Expand and see if the toggle is off.
+    await toggleItem("updates");
+    assert.isFalse(await isEnabled(autoCheckToggle()));
+  });
+
+  it("shows up-to-date message", async function() {
+    // Restart the server to clear cached version check
+    await server.restart(true);
+    session = await gu.session().personalSite.login();
+    await session.loadDocMenu("/");
+    await driver.get(`${server.getHost()}/admin`);
+    await gu.waitForAdminPanel();
+
+    fakeServer.latestVersion = await currentVersion();
+
+    // Click upper check now.
+    await upperCheckNow().click();
+    await waitForStatus(/Grist is up to date/);
+
+    // Update version once again.
+    fakeServer.bumpVersion();
+    // Click lower check now.
+    fakeServer.pause();
+    await toggleItem("updates");
+    await lowerCheckNow().click();
+    await waitForStatus(/Checking for updates/);
+    fakeServer.resume();
+    await waitForStatus(/Newer version available/);
+
+    // Make sure we see the new version.
+    assert.isTrue(await versionBox().isDisplayed());
+    assert.match(await versionBox().getText(), new RegExp(`Version ${fakeServer.latestVersion}`));
+
+    // Make sure that checking it twice also works when a newer version is available
+    await autoCheckToggle().click();
+    assert.isFalse(await isEnabled(autoCheckToggle()));
+    await autoCheckToggle().click();
+    assert.isTrue(await isEnabled(autoCheckToggle()));
+    await waitForStatus(/Newer version available/);
+  });
+
+  it("shows error message", async function() {
+    fakeServer.failNext = true;
+    fakeServer.pause();
+    await lowerCheckNow().click();
+    await waitForStatus(/Checking for updates/);
+    fakeServer.resume();
+    await waitForStatus(/Error checking for updates/);
+    assert.match((await gu.getToasts())[0], /some error/);
+    await gu.wipeToasts();
+  });
+
+  it("should send telemetry data", async function() {
+    assert.deepEqual({ ...fakeServer.payload, installationId: "test" }, {
+      installationId: "test",
+      deploymentType: "core",
+      currentVersion: await currentVersion(),
+    });
+    assert.isNotEmpty(fakeServer.payload.installationId);
+  });
+
+  it("should show a message if automatic version checking is missing", async function() {
+    process.env.GRIST_ALLOW_AUTOMATIC_VERSION_CHECKING = "false";
+    await server.restart(true);
+    session = await gu.session().personalSite.login();
+    await session.loadDocMenu("/");
+    await driver.get(`${server.getHost()}/admin`);
+    await gu.waitForAdminPanel();
+    await toggleItem("updates");
+    // The message should be there.
+    assert.isTrue(await autoCheckToggleDisabled().isDisplayed());
+  });
+
+  it("should survive APP_HOME_URL misconfiguration", async function() {
+    process.env.APP_HOME_URL = "http://misconfigured.invalid";
+    process.env.GRIST_BOOT_KEY = "zig";
+    await server.restart(true);
+    await driver.get(`${server.getHost()}/admin`);
+    await gu.waitForAdminPanel();
+  });
+
+  it("should honor GRIST_BOOT_KEY fallback", async function() {
+    await gu.removeLogin();
+    await driver.get(`${server.getHost()}/admin`);
+    await gu.waitForAdminPanel();
+    assert.equal(await driver.find(".test-admin-panel").isDisplayed(), true);
+    assert.match(await driver.find(".test-admin-panel").getText(), /Administrator Panel Unavailable/);
+
+    process.env.GRIST_BOOT_KEY = "zig";
+    await server.restart(true);
+    await driver.get(`${server.getHost()}/admin?boot-key=zig`);
+    await gu.waitForAdminPanel();
+    assert.equal(await driver.find(".test-admin-panel").isDisplayed(), true);
+    assert.notMatch(await driver.find(".test-admin-panel").getText(), /Administrator Panel Unavailable/);
+    await driver.get(`${server.getHost()}/admin?boot-key=zig-wrong`);
+    await gu.waitForAdminPanel();
+    assert.equal(await driver.find(".test-admin-panel").isDisplayed(), true);
+    assert.match(await driver.find(".test-admin-panel").getText(), /Administrator Panel Unavailable/);
+  });
+
+  it("should show no admins if `GRIST_DEFAULT_EMAIL` is unset", async function() {
+    // If the env var is unset, core and SaaS handle the situation
+    // differently. Core will supply a hardcoded default of you@example.com.
+    //
+    // For the purpose of this test, let's instead set it to the empty
+    // string.
+    process.env.GRIST_DEFAULT_EMAIL = "";
+    await server.restart(true);
+    await driver.get(`${server.getHost()}/admin?boot-key=zig`);
+    await gu.waitForAdminPanel();
+
+    const adminAccounts = await driver.findWait(".test-admin-panel-item-admins", 2000);
+    assert.equal(await adminAccounts.isDisplayed(), true);
+    const adminDisplay = await driver.findWait(".test-admin-panel-admin-accounts-display", 1000);
+
+    assert.equal("no admin accounts", await adminDisplay.getText());
+
+    await toggleItem("admins");
+
+    const adminsList = await driver.find(".test-admin-panel-admin-accounts-list");
+    assert.equal(await adminsList.isDisplayed(), true);
+
+    const names = await adminAccounts.findAll(".test-admin-panel-admin-accounts-list-item");
+    assert.equal(names.length, 1);
+
+    assert.equal(await names[0].getText(), "Admin account not found\n" +
+    "Missing admin account because GRIST_ADMIN_EMAIL and GRIST_DEFAULT_EMAIL are not set");
+  });
+
+  async function assertAdminPanelUnavailable() {
+    assert.isTrue(
+      await driver.findContentWait(".test-admin-panel-error", "Administrator Panel Unavailable", 2000).isDisplayed(),
+    );
+    assert.isTrue(
+      await driver.findContent("a", "Sign in with boot key").isDisplayed(),
+    );
+  }
+
+  it("should show error page if unauthorized", async function() {
+    await driver.get(`${server.getHost()}/admin`);
+    await assertAdminPanelUnavailable();
+  });
+
+  describe("with boot-key parameter", function() {
+    let oldEnvBootKey: testUtils.EnvironmentSnapshot;
+
+    before(async function() {
+      oldEnvBootKey = new testUtils.EnvironmentSnapshot();
+      process.env.GRIST_BOOT_KEY = "lala";
+      await server.restart();
+    });
+
+    after(async function() {
+      oldEnvBootKey.restore();
+      await server.restart();
+    });
+
+    it("should show error page when boot key is invalid", async function() {
+      await driver.get(`${server.getHost()}/admin?boot-key=bilbo`);
+      await assertAdminPanelUnavailable();
+    });
+
+    it("should show admin page when boot key is valid", async function() {
+      await driver.get(`${server.getHost()}/admin?boot-key=lala`);
+      await driver.findContentWait("div", /Is an internal health check passing/, 2000);
+    });
+  });
+});
+
+async function assertTelemetryLevel(level: TelemetryLevel) {
+  const telemetryLevel = await driver.executeScript("return window.gristConfig.telemetry?.telemetryLevel");
+  assert.equal(telemetryLevel, level);
+}

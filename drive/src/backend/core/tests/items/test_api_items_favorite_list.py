@@ -1,0 +1,321 @@
+"""Test for the document favorite_list endpoint."""
+
+import pytest
+from rest_framework.test import APIClient
+
+from core import factories, models
+
+pytestmark = pytest.mark.django_db
+
+
+def test_api_item_favorite_list_anonymous():
+    """Anonymous users should receive a 401 error."""
+
+    client = APIClient()
+
+    response = client.get("/api/v1.0/items/favorites/")
+
+    assert response.status_code == 401
+
+
+def test_api_item_favorite_list_authenticated_no_favorite():
+    """Authenticated users should receive an empty list."""
+
+    user = factories.UserFactory()
+
+    client = APIClient()
+
+    client.force_login(user)
+
+    response = client.get("/api/v1.0/items/favorites/")
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "count": 0,
+        "next": None,
+        "previous": None,
+        "results": [],
+    }
+
+
+def test_api_item_favorite_list_authenticated_with_favorite():
+    """Authenticated users with a favorite should receive the favorite."""
+
+    user = factories.UserFactory()
+
+    client = APIClient()
+
+    client.force_login(user)
+
+    # User don't have access to this item, let say it had access and this access has been
+    # removed. It should not be in the favorite list anymore.
+    factories.ItemFactory(favorited_by=[user])
+
+    item = factories.UserItemAccessFactory(
+        user=user,
+        role=models.RoleChoices.READER,
+        item__favorited_by=[user],
+        item__update_upload_state=models.ItemUploadStateChoices.READY,
+    ).item
+
+    response = client.get("/api/v1.0/items/favorites/")
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "count": 1,
+        "next": None,
+        "previous": None,
+        "results": [
+            {
+                "abilities": item.get_abilities(user),
+                "created_at": item.created_at.isoformat().replace("+00:00", "Z"),
+                "creator": {
+                    "id": str(item.creator.id),
+                    "full_name": item.creator.full_name,
+                    "short_name": item.creator.short_name,
+                },
+                "depth": item.depth,
+                "id": str(item.id),
+                "link_reach": item.link_reach,
+                "link_role": item.link_role,
+                "numchild": 0,
+                "numchild_folder": 0,
+                "path": str(item.path),
+                "title": item.title,
+                "type": item.type,
+                "updated_at": item.updated_at.isoformat().replace("+00:00", "Z"),
+                "upload_state": item.upload_state,
+                "url": f"http://localhost:8083/media/item/{item.id!s}/{item.filename}"
+                if item.type == models.ItemTypeChoices.FILE
+                else None,
+                "url_permalink": f"http://testserver/api/v1.0/items/{item.id!s}/download/"
+                if item.type == models.ItemTypeChoices.FILE
+                else None,
+                "url_preview": None,
+                "mimetype": None,
+                "user_role": "reader",
+                "main_workspace": False,
+                "filename": item.filename,
+                "size": None,
+                "description": None,
+                "deleted_at": None,
+                "hard_delete_at": None,
+                "is_wopi_supported": False,
+                "is_favorite": True,
+            }
+        ],
+    }
+
+
+def test_api_item_favorite_list_with_suspicious_items():
+    """
+    Suspicious items should not be listed in favorite list for non creator.
+    """
+    creator = factories.UserFactory()
+    other_user = factories.UserFactory()
+    client = APIClient()
+    client.force_login(other_user)
+
+    # Create suspicious item and mark it as favorite by non-creator
+    suspicious_item = factories.ItemFactory(
+        creator=creator,
+        update_upload_state=models.ItemUploadStateChoices.SUSPICIOUS,
+        users=[creator, other_user],
+        type=models.ItemTypeChoices.FILE,
+        filename="suspicious.txt",
+        favorited_by=[other_user, creator],
+    )
+
+    # Create normal item and mark it as favorite by non-creator
+    normal_item = factories.ItemFactory(
+        creator=creator,
+        update_upload_state=models.ItemUploadStateChoices.READY,
+        users=[creator, other_user],
+        type=models.ItemTypeChoices.FILE,
+        filename="normal.txt",
+        favorited_by=[other_user, creator],
+    )
+
+    # Non-creator should only see normal item in favorite list, not suspicious one
+    response = client.get("/api/v1.0/items/favorites/")
+    assert response.status_code == 200
+    content = response.json()
+
+    # Should only see 1 normal item, not the suspicious one
+    assert content["count"] == 1
+    item_ids = [item["id"] for item in content["results"]]
+    assert str(suspicious_item.id) not in item_ids
+    assert str(normal_item.id) in item_ids
+
+    # Creator should see all their favorited items including suspicious one
+    client.force_login(creator)
+    response = client.get("/api/v1.0/items/favorites/")
+    assert response.status_code == 200
+    content = response.json()
+
+    assert content["count"] == 2
+    item_ids = [item["id"] for item in content["results"]]
+    assert str(suspicious_item.id) in item_ids
+    assert str(normal_item.id) in item_ids
+
+
+def test_api_item_favorite_list_children():
+    """
+    Children items should be listed in favorite list too.
+    """
+    user = factories.UserFactory()
+    client = APIClient()
+    client.force_login(user)
+
+    parent_item = factories.ItemFactory(
+        creator=user,
+        type=models.ItemTypeChoices.FOLDER,
+        title="parent",
+    )
+    child_item = factories.ItemFactory(
+        creator=user,
+        parent=parent_item,
+        type=models.ItemTypeChoices.FOLDER,
+        title="child",
+        favorited_by=[user],
+    )
+
+    factories.UserItemAccessFactory(item=parent_item, user=user)
+
+    response = client.get("/api/v1.0/items/favorites/")
+    assert response.status_code == 200
+    content = response.json()
+    assert content["count"] == 1
+    assert content["results"][0]["id"] == str(child_item.id)
+
+
+def test_api_item_favorite_list_filtering(django_assert_num_queries):
+    """
+    Test filtering the favorite list by type.
+    """
+    user = factories.UserFactory()
+    client = APIClient()
+    client.force_login(user)
+
+    parent_item = factories.ItemFactory(
+        type=models.ItemTypeChoices.FOLDER,
+        users=[(user, models.RoleChoices.EDITOR)],
+        update_upload_state=models.ItemUploadStateChoices.READY,
+    )
+    child_item = factories.ItemFactory(
+        parent=parent_item, type=models.ItemTypeChoices.FOLDER, favorited_by=[user]
+    )
+    file_item = factories.ItemFactory(
+        parent=parent_item,
+        type=models.ItemTypeChoices.FILE,
+        favorited_by=[user],
+        update_upload_state=models.ItemUploadStateChoices.READY,
+    )
+
+    with django_assert_num_queries(6):
+        response = client.get("/api/v1.0/items/favorites/?type=folder")
+
+    assert response.status_code == 200
+    content = response.json()
+    assert content["count"] == 1
+    assert content["results"][0]["id"] == str(child_item.id)
+
+    with django_assert_num_queries(6):
+        response = client.get("/api/v1.0/items/favorites/?type=file")
+
+    assert response.status_code == 200
+    content = response.json()
+    assert content["count"] == 1
+    assert content["results"][0]["id"] == str(file_item.id)
+
+
+@pytest.mark.parametrize(
+    "ordering",
+    [
+        "created_at",
+        "-created_at",
+        "title",
+        "-title",
+        "updated_at",
+        "-updated_at",
+        "size",
+        "-size",
+        "creator__full_name",
+        "-creator__full_name",
+    ],
+)
+def test_api_item_favorite_list_ordering_by_fields(ordering, django_assert_num_queries):
+    """Test ordering the favorite list endpoint by fields"""
+
+    user1 = factories.UserFactory(full_name="Camille Clement", short_name="camille")
+    user2 = factories.UserFactory(full_name="Eva Roussel", short_name="Eva")
+
+    item_favorited1 = factories.ItemFactory(
+        creator=user1,
+        users=[(user1, "owner")],
+        type=models.ItemTypeChoices.FILE,
+        update_upload_state=models.ItemUploadStateChoices.READY,
+        favorited_by=[user1],
+        title="abcd",
+        size=10,
+    )
+
+    item_favorited2 = factories.ItemFactory(
+        creator=user2,
+        users=[(user2, "owner"), (user1, "editor")],
+        type=models.ItemTypeChoices.FILE,
+        update_upload_state=models.ItemUploadStateChoices.READY,
+        favorited_by=[user1],
+        title="mnlo",
+        size=20,
+    )
+
+    client = APIClient()
+    client.force_login(user1)
+
+    is_descending = ordering.startswith("-")
+    querystring = f"?ordering={ordering}"
+
+    with django_assert_num_queries(6):
+        response = client.get(f"/api/v1.0/items/favorites/{querystring:s}")
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert len(results) == 2
+
+    if is_descending:
+        assert results[0]["id"] == str(item_favorited2.id)
+        assert results[1]["id"] == str(item_favorited1.id)
+    else:
+        assert results[0]["id"] == str(item_favorited1.id)
+        assert results[1]["id"] == str(item_favorited2.id)
+
+
+def test_api_items_favorite_list_filter_category():
+    """The favorite list can be filtered by file type category."""
+    user = factories.UserFactory()
+    client = APIClient()
+    client.force_login(user)
+
+    image = factories.ItemFactory(
+        users=[user],
+        favorited_by=[user],
+        type=models.ItemTypeChoices.FILE,
+        filename="pic.png",
+        update_upload_state=models.ItemUploadStateChoices.READY,
+    )
+    pdf = factories.ItemFactory(
+        users=[user],
+        favorited_by=[user],
+        type=models.ItemTypeChoices.FILE,
+        filename="doc.pdf",
+        update_upload_state=models.ItemUploadStateChoices.READY,
+    )
+
+    response = client.get("/api/v1.0/items/favorites/?category=image")
+
+    assert response.status_code == 200
+    ids = {result["id"] for result in response.json()["results"]}
+    assert str(image.id) in ids
+    assert str(pdf.id) not in ids

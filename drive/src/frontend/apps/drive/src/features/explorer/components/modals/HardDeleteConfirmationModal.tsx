@@ -1,0 +1,53 @@
+import {
+  Button,
+  DecisionModalProps,
+  Modal,
+  ModalSize,
+} from "@gouvfr-lasuite/ui-components";
+
+import { useTranslation } from "react-i18next";
+
+export const HardDeleteConfirmationModal = ({
+  onDecide,
+  count = 1,
+  ...props
+}: DecisionModalProps & {
+  count?: number;
+}) => {
+  const { t } = useTranslation();
+  return (
+    <Modal
+      title={t("explorer.trash.hard_delete.title")}
+      size={ModalSize.MEDIUM}
+      rightActions={
+        <>
+          <Button
+            variant="bordered"
+            onClick={() => {
+              onDecide(null);
+              props.onClose();
+            }}
+          >
+            {t("explorer.trash.hard_delete.cancel")}
+          </Button>
+          <Button
+            color="error"
+            onClick={() => {
+              onDecide("yes");
+              props.onClose();
+            }}
+          >
+            {t("explorer.trash.hard_delete.confirm")}
+          </Button>
+        </>
+      }
+      {...props}
+    >
+      <div className="c__modal__content__text">
+        {t("explorer.trash.hard_delete.content", {
+          count,
+        })}
+      </div>
+    </Modal>
+  );
+};

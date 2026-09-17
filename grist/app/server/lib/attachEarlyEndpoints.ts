@@ -1,0 +1,475 @@
+import { ApiError, ApiErrorDetails } from "app/common/ApiError";
+import {
+  ConfigKey,
+  ConfigKeyChecker,
+  ConfigValue,
+  ConfigValueCheckers,
+} from "app/common/Config";
+import { GristEdition } from "app/common/gristUrls";
+import { InstallPrefs } from "app/common/Install";
+import { PermissionsStatus, PrefSource } from "app/common/InstallAPI";
+import { getOrgKey } from "app/gen-server/ApiServer";
+import { Config } from "app/gen-server/entity/Config";
+import {
+  PreviousAndCurrent,
+  QueryResult,
+} from "app/gen-server/lib/homedb/Interfaces";
+import { canRestart, makeAdminPageConfig } from "app/server/lib/adminPageConfig";
+import { appSettings } from "app/server/lib/AppSettings";
+import { RequestWithLogin } from "app/server/lib/Authorizer";
+import { getBootKeySessionId } from "app/server/lib/Boot";
+import { BootProbes } from "app/server/lib/BootProbes";
+import { expressWrap } from "app/server/lib/expressWrap";
+import { GristServer } from "app/server/lib/GristServer";
+import {
+  getAnonPlaygroundEnabled, getAnonPlaygroundEnabledSource,
+  getCanAnyoneCreateOrgs, getCanAnyoneCreateOrgsSource,
+  getForceLogin, getForceLoginSource,
+  getPersonalOrgsEnabled, getPersonalOrgsEnabledSource,
+  invalidateReloadableSettings,
+} from "app/server/lib/gristSettings";
+import log from "app/server/lib/log";
+import {
+  getScope,
+  sendOkReply,
+  sendReply,
+  stringParam,
+} from "app/server/lib/requestUtils";
+import { attachSetupRequestsEndpoints } from "app/server/lib/SetupRequestsEndpoints";
+import { getTelemetryPrefs } from "app/server/lib/Telemetry";
+import { updateGristServerLatestVersion } from "app/server/lib/updateChecker";
+
+import {
+  Application,
+  json,
+  NextFunction,
+  Request,
+  RequestHandler,
+  Response,
+} from "express";
+import isEmpty from "lodash/isEmpty";
+import pick from "lodash/pick";
+
+export interface AttachOptions {
+  app: Application;
+  gristServer: GristServer;
+  userIdMiddleware: RequestHandler;
+}
+
+/**
+ * Attaches endpoints that should be available as early as possible
+ * in the Grist startup process.
+ *
+ * These endpoints comprise a baseline for troubleshooting a faulty
+ * installation of Grist. Currently, this includes the landing page
+ * for the Admin Panel, and API endpoints for restarting the install,
+ * checking the status of various install probes, reading/writing install
+ * prefs, and reading/writing install and org configuration.
+ *
+ * Only the bare minimum middleware needed for these endpoints to function
+ * should be added beforehand (e.g. `userIdMiddleware`).
+ */
+export function attachEarlyEndpoints(options: AttachOptions) {
+  const { app, gristServer, userIdMiddleware } = options;
+
+  // Admin endpoint needs to have very little middleware since each
+  // piece of middleware creates a new way to fail and leave the admin
+  // panel inaccessible. Generally the admin panel should report problems
+  // rather than failing entirely.
+  app.get(
+    "/admin/:subpath(*)?",
+    userIdMiddleware,
+    expressWrap(async (req, res) => {
+      return gristServer.sendAppPage(req, res, {
+        path: "app.html",
+        status: 200,
+        config: await makeAdminPageConfig(req, gristServer),
+      });
+    }),
+  );
+
+  const requireInstallAdmin = gristServer
+    .getInstallAdmin()
+    .getMiddlewareRequireAdmin();
+
+  const adminMiddleware = [requireInstallAdmin];
+  app.use("/api/admin", adminMiddleware);
+  app.use("/api/install", adminMiddleware);
+
+  const probes = new BootProbes(app, gristServer, "/api", adminMiddleware);
+  probes.addEndpoints();
+
+  // Setup requests rely on the /api/admin gate just registered for their admin half.
+  attachSetupRequestsEndpoints(app, gristServer);
+
+  app.post(
+    "/api/admin/restart",
+    expressWrap(async (req, res) => {
+      const mreq = req as RequestWithLogin;
+      const meta = {
+        host: mreq.get("host"),
+        path: mreq.path,
+        email: mreq.user?.loginEmail,
+      };
+      log.rawDebug(`Restart[${mreq.method}] starting:`, meta);
+      res.on("finish", () => {
+        // If we have IPC with parent process (e.g. when running under
+        // Docker) tell the parent that we have a new environment so it
+        // can restart us.
+        log.rawDebug(`Restart[${mreq.method}] finishing:`, meta);
+        if (process.send && canRestart()) {
+          log.rawDebug(`Restart[${mreq.method}] requesting restart:`, meta);
+          process.send({ action: "restart" });
+        }
+      });
+      if (!canRestart()) {
+        // On the topic of http response codes, thus spake MDN:
+        // "409: This response is sent when a request conflicts with the current state of the server."
+        return res.status(409).send({
+          error:
+            "Cannot automatically restart the Grist server to enact changes. Please restart server manually.",
+          details: { code: "RestartUnavailable" } satisfies ApiErrorDetails,
+        });
+      }
+      // We're going down, so we're no longer ready to serve requests.
+      gristServer.setReady(false);
+      return res.status(200).send({ msg: "ok" });
+    }),
+  );
+
+  // Restrict this endpoint to install admins.
+  app.get(
+    "/api/install/prefs",
+    expressWrap(async (_req, res) => {
+      const prefs = await gristServer.getActivations().getPrefsWithSources();
+      return sendOkReply(null, res, prefs);
+    }),
+  );
+
+  // Returns current default permission settings with their sources.
+  app.get(
+    "/api/install/permissions",
+    expressWrap(async (_req, res) => {
+      const toPrefSource = (s: "env" | "db" | undefined): PrefSource | undefined =>
+        s === "env" ? "environment-variable" : s === "db" ? "preferences" : undefined;
+      const telemetryPrefs = await getTelemetryPrefs(gristServer.getHomeDBManager());
+      const status: PermissionsStatus = {
+        orgCreationAnyone: { value: getCanAnyoneCreateOrgs(), source: toPrefSource(getCanAnyoneCreateOrgsSource()) },
+        personalOrgs: { value: getPersonalOrgsEnabled(), source: toPrefSource(getPersonalOrgsEnabledSource()) },
+        forceLogin: { value: getForceLogin(), source: toPrefSource(getForceLoginSource()) },
+        anonPlayground: { value: getAnonPlaygroundEnabled(), source: toPrefSource(getAnonPlaygroundEnabledSource()) },
+        telemetry: {
+          value: telemetryPrefs.telemetryLevel.value !== "off",
+          source: telemetryPrefs.telemetryLevel.source,
+        },
+      };
+      return sendOkReply(null, res, status);
+    }),
+  );
+
+  // Used by the "Change admin user" modal to flag the case where a Replace
+  // would later fail at restart because a user with the new admin email
+  // already exists (the rename can't satisfy the unique constraint on
+  // logins.email).
+  app.get(
+    "/api/install/users/exists",
+    expressWrap(async (req, res) => {
+      const email = stringParam(req.query.email, "email");
+      const user = await gristServer.getHomeDBManager().getExistingUserByLogin(email);
+      return sendOkReply(req, res, { exists: Boolean(user) });
+    }),
+  );
+
+  app.patch(
+    "/api/install/prefs",
+    json({ limit: "1mb" }),
+    expressWrap(async (req, res) => {
+      const prefs = req.body as InstallPrefs;
+      const { telemetry, envVars } = prefs;
+
+      // Which session survives a session clear is the server's decision alone, so drop any
+      // value the client sent and derive it here.
+      delete prefs.onRestartKeepSessionId;
+      if (prefs.onRestartClearSessions) {
+        // Keeping the boot-key session protects the operator mid-setup. Going live ends
+        // the setup, so nothing is kept from that point on.
+        const goingLive = envVars?.GRIST_IN_SERVICE === "true";
+        prefs.onRestartKeepSessionId = goingLive ?
+          null :
+          (await getBootKeySessionId(req, gristServer)) ?? null;
+      }
+
+      if (envVars && typeof envVars === "object" && "GRIST_SERVER_EDITION" in envVars) {
+        const edition = envVars.GRIST_SERVER_EDITION;
+        if (!GristEdition.guard(edition)) {
+          throw new ApiError(`Invalid GRIST_SERVER_EDITION value: ${edition}`, 400);
+        }
+      }
+
+      await gristServer.getActivations().updatePrefs(prefs);
+
+      if (telemetry) {
+        // Make sure the Telemetry singleton picks up the changes to telemetry preferences.
+        // TODO: if there are multiple home server instances, notify them all of changes to
+        // preferences (via Redis Pub/Sub).
+        await gristServer.getTelemetry().fetchTelemetryPrefs();
+      }
+
+      if (!isEmpty(envVars)) {
+        // TODO: Similar to above, we need to notify other servers of updates to env vars.
+        appSettings.setEnvVars((await gristServer.getActivations().current()).prefs?.envVars || {});
+        invalidateReloadableSettings(...Object.keys(envVars!));
+      }
+
+      return res.status(200).send();
+    }),
+  );
+
+  // Retrieves the latest version of the client from Grist SAAS endpoint.
+  app.get(
+    "/api/install/updates",
+    expressWrap(async (_req, res) => {
+      try {
+        const updateData = await updateGristServerLatestVersion(gristServer, true);
+        res.json(updateData);
+      } catch (error) {
+        res.status(error.status);
+        if (typeof error.details === "object") {
+          res.json(error.details);
+        } else {
+          res.send(error.details);
+        }
+      }
+    }),
+  );
+
+  app.get(
+    "/api/install/configs/:key",
+    hasValidConfigKey,
+    expressWrap(async (req, res) => {
+      const key = stringParam(req.params.key, "key") as ConfigKey;
+      const configResult = await gristServer
+        .getHomeDBManager()
+        .getInstallConfig(key);
+      const result = pruneConfigAPIResult(configResult);
+      return sendReply(req, res, result);
+    }),
+  );
+
+  app.put(
+    "/api/install/configs/:key",
+    json({ limit: "1mb", strict: false }),
+    hasValidConfig,
+    expressWrap(async (req, res) => {
+      const key = stringParam(req.params.key, "key") as ConfigKey;
+      const value = req.body as ConfigValue;
+      const configResult = await gristServer
+        .getHomeDBManager()
+        .updateInstallConfig(key, value);
+      if (configResult.data) {
+        logCreateOrUpdateConfigEvents(req, configResult.data);
+      }
+      const result = pruneConfigAPIResult(configResult);
+      return sendReply(req, res, result);
+    }),
+  );
+
+  app.delete(
+    "/api/install/configs/:key",
+    hasValidConfigKey,
+    expressWrap(async (req, res) => {
+      const key = stringParam(req.params.key, "key") as ConfigKey;
+      const { data, ...result } = await gristServer
+        .getHomeDBManager()
+        .deleteInstallConfig(key);
+      if (data) {
+        logDeleteConfigEvents(req, data);
+      }
+      return sendReply(req, res, result);
+    }),
+  );
+
+  app.get(
+    "/api/orgs/:oid/configs/:key",
+    hasValidConfigKey,
+    expressWrap(async (req, res) => {
+      const org = getOrgKey(req);
+      const key = stringParam(req.params.key, "key") as ConfigKey;
+      const configResult = await gristServer
+        .getHomeDBManager()
+        .getOrgConfig(getScope(req), org, key);
+      const result = pruneConfigAPIResult(configResult);
+      return sendReply(req, res, result);
+    }),
+  );
+
+  app.put(
+    "/api/orgs/:oid/configs/:key",
+    json({ limit: "1mb", strict: false }),
+    hasValidConfig,
+    expressWrap(async (req, res) => {
+      const key = stringParam(req.params.key, "key") as ConfigKey;
+      const org = getOrgKey(req);
+      const value = req.body as ConfigValue;
+      const configResult = await gristServer
+        .getHomeDBManager()
+        .updateOrgConfig(getScope(req), org, key, value);
+      if (configResult.data) {
+        logCreateOrUpdateConfigEvents(req, configResult.data);
+      }
+      const result = pruneConfigAPIResult(configResult);
+      return sendReply(req, res, result);
+    }),
+  );
+
+  app.delete(
+    "/api/orgs/:oid/configs/:key",
+    hasValidConfigKey,
+    expressWrap(async (req, res) => {
+      const org = getOrgKey(req);
+      const key = stringParam(req.params.key, "key") as ConfigKey;
+      const { data, status } = await gristServer
+        .getHomeDBManager()
+        .deleteOrgConfig(getScope(req), org, key);
+      if (data) {
+        logDeleteConfigEvents(req, data);
+      }
+      return sendReply(req, res, { status });
+    }),
+  );
+
+  function logCreateOrUpdateConfigEvents(
+    req: Request,
+    config: Config | PreviousAndCurrent<Config>,
+  ) {
+    const mreq = req as RequestWithLogin;
+    if ("previous" in config) {
+      const { previous, current } = config;
+      gristServer.getAuditLogger().logEvent(mreq, {
+        action: "config.update",
+        context: {
+          site: current.org ?
+            pick(current.org, "id", "name", "domain") :
+            undefined,
+        },
+        details: {
+          previous: {
+            config: {
+              ...pick(previous, "id", "key", "value"),
+              site: previous.org ?
+                pick(previous.org, "id", "name", "domain") :
+                undefined,
+            },
+          },
+          current: {
+            config: {
+              ...pick(current, "id", "key", "value"),
+              site: current.org ?
+                pick(current.org, "id", "name", "domain") :
+                undefined,
+            },
+          },
+        },
+      });
+    } else {
+      gristServer.getAuditLogger().logEvent(mreq, {
+        action: "config.create",
+        context: {
+          site: config.org ?
+            pick(config.org, "id", "name", "domain") :
+            undefined,
+        },
+        details: {
+          config: {
+            ...pick(config, "id", "key", "value"),
+            site: config.org ?
+              pick(config.org, "id", "name", "domain") :
+              undefined,
+          },
+        },
+      });
+    }
+  }
+
+  function logDeleteConfigEvents(req: Request, config: Config) {
+    gristServer.getAuditLogger().logEvent(req as RequestWithLogin, {
+      action: "config.delete",
+      context: {
+        site: config.org ? pick(config.org, "id", "name", "domain") : undefined,
+      },
+      details: {
+        config: {
+          ...pick(config, "id", "key", "value"),
+          site: config.org ?
+            pick(config.org, "id", "name", "domain") :
+            undefined,
+        },
+      },
+    });
+  }
+}
+
+function pruneConfigAPIResult(
+  result: QueryResult<Config | PreviousAndCurrent<Config>>,
+) {
+  if (!result.data) {
+    return result as unknown as QueryResult<undefined>;
+  }
+
+  const config = "previous" in result.data ? result.data.current : result.data;
+  return {
+    ...result,
+    data: {
+      ...pick(config, "id", "key", "value", "createdAt", "updatedAt"),
+      ...(config.org ?
+        { org: pick(config.org, "id", "name", "domain") } :
+        undefined),
+    },
+  };
+}
+
+function hasValidConfig(req: Request, _res: Response, next: NextFunction) {
+  try {
+    assertValidConfig(req);
+    next();
+  } catch (e) {
+    next(e);
+  }
+}
+
+function hasValidConfigKey(req: Request, _res: Response, next: NextFunction) {
+  try {
+    assertValidConfigKey(req);
+    next();
+  } catch (e) {
+    next(e);
+  }
+}
+
+function assertValidConfig(req: Request) {
+  assertValidConfigKey(req);
+  const key = stringParam(req.params.key, "key") as ConfigKey;
+  try {
+    ConfigValueCheckers[key].check(req.body);
+  } catch (err) {
+    log.warn(
+      `Error during API call to ${req.path}: invalid config value (${String(
+        err,
+      )})`,
+    );
+    throw new ApiError("Invalid config value", 400, { userError: String(err) });
+  }
+}
+
+function assertValidConfigKey(req: Request) {
+  try {
+    ConfigKeyChecker.check(req.params.key);
+  } catch (err) {
+    log.warn(
+      `Error during API call to ${req.path}: invalid config key (${String(
+        err,
+      )})`,
+    );
+    throw new ApiError("Invalid config key", 400, { userError: String(err) });
+  }
+}

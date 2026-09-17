@@ -1,0 +1,31 @@
+{
+    "extends": ["github>numerique-gouv/renovate-configuration"],
+    "dependencyDashboard": true,
+    "labels": ["dependencies", "noChangeLog"],
+    "packageRules": [
+        {
+            "groupName": "allowed redis versions",
+            "matchManagers": ["pep621"],
+            "matchPackageNames": ["redis"],
+            "allowedVersions": "<6.0.0"
+        },
+        {
+            "groupName": "allowed django versions",
+            "matchManagers": ["pep621"],
+            "matchPackageNames": ["django"],
+            "allowedVersions": "<6.0.0"
+        },
+        {
+            "groupName": "allowed mozilla-django-oidc versions",
+            "matchManagers": ["pep621"],
+            "matchPackageNames": ["mozilla-django-oidc"],
+            "allowedVersions": "<5.0.0"
+        },
+        {
+            "description": "Disable requires-python updates - managed manually",
+            "matchManagers": ["pep621"],
+            "matchPackageNames": ["python"],
+            "enabled": false
+        }
+    ]
+}

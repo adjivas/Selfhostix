@@ -1,0 +1,164 @@
+#
+# impress package
+#
+[build-system]
+requires = ["uv_build>=0.11.9,<0.12"]
+build-backend = "uv_build"
+
+[project]
+name = "impress"
+version = "5.7.0"
+authors = [{ "name" = "DINUM", "email" = "dev@mail.numerique.gouv.fr" }]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Framework :: Django",
+    "Framework :: Django :: 5",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Natural Language :: English",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+description = "Docs is a collaborative text editor designed to address common challenges in knowledge building and sharing."
+keywords = ["Django", "Contacts", "Templates", "RBAC"]
+license = "MIT"
+requires-python = "~=3.14.0"
+dependencies = [
+    "beautifulsoup4==4.15.0",
+    "boto3==1.43.56",
+    "Brotli==1.2.0",
+    "celery[redis]==5.6.3",
+    "dj-database-url==3.1.2",
+    "django-configurations==2.5.1",
+    "django-cors-headers==4.9.0",
+    "django-countries==9.0.0",
+    "django-csp==4.0",
+    "django-filter==26.1",
+    "django-lasuite[all]==0.0.27",
+    "django-parler==2.4",
+    "django-redis==7.0.0",
+    "django-silk==5.5.2",
+    "django-storages[s3]==1.14.6",
+    "django-timezone-field>=5.1",
+    "django<6.0.0",
+    "django-treebeard<5.0.0",
+    "djangorestframework==3.17.2",
+    "django-waffle==5.0.0",
+    "drf_spectacular==0.30.0",
+    "dockerflow==2026.3.4",
+    "easy_thumbnails==2.10.1",
+    "emoji==2.15.0",
+    "factory_boy==3.3.3",
+    "gunicorn==26.0.0",
+    "jsonschema==4.26.0",
+    "langfuse==3.11.2",
+    "lxml==6.1.1",
+    "markdown==3.10.2",
+    "mozilla-django-oidc==5.0.2",
+    "nested-multipart-parser==1.6.0",
+    "openai==2.48.0",
+    "posthog==7.29.0",
+    "psycopg[binary,pool]==3.3.4",
+    "pycrdt==0.14.1",
+    "pydantic==2.13.4",
+    "pydantic-ai-slim[openai,mistral,logfire,web]==1.107.1",
+    "PyJWT==2.13.0",
+    "python-magic==0.4.27",
+    "redis<6.0.0",
+    "requests==2.34.2",
+    "sentry-sdk==2.66.1",
+    "servestatic==4.3.3",
+    "uvicorn==0.51.0",
+]
+
+[project.urls]
+"Bug Tracker" = "https://github.com/suitenumerique/docs/issues/new"
+"Changelog" = "https://github.com/suitenumerique/docs/blob/main/CHANGELOG.md"
+"Homepage" = "https://github.com/suitenumerique/docs"
+"Repository" = "https://github.com/suitenumerique/docs"
+
+[project.optional-dependencies]
+dev = [
+    "django-extensions==4.1",
+    "django-test-migrations==1.5.0",
+    "drf-spectacular-sidecar==2026.7.1",
+    "freezegun==1.5.5",
+    "ipdb==0.13.13",
+    "ipython==9.15.0",
+    "pyfakefs==6.2.0",
+    "pylint-django==2.8.0",
+    "pylint==4.0.6",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "pytest-django==4.12.0",
+    "pytest==9.1.1",
+    "pytest-icdiff==0.9",
+    "pytest-xdist==3.8.0",
+    "responses==0.26.2",
+    "ruff==0.16.0",
+    "types-requests==2.33.0.20260712",
+]
+
+[tool.uv.build-backend]
+module-name = [
+    "core",
+    "demo",
+    "impress"
+]
+module-root = ""
+source-exclude = [
+    "**/tests/**",
+    "**/test_*.py",
+    "**/tests.py",
+]
+
+[tool.ruff]
+exclude = [
+    ".git",
+    ".venv",
+    "build",
+    "venv",
+    "__pycache__",
+]
+line-length = 88
+
+
+[tool.ruff.lint]
+ignore = ["DJ001", "PLR2004"]
+select = [
+    "B", # flake8-bugbear
+    "BLE", # flake8-blind-except
+    "C4", # flake8-comprehensions
+    "DJ", # flake8-django
+    "I", # isort
+    "PLC", # pylint-convention
+    "PLE", # pylint-error
+    "PLR", # pylint-refactoring
+    "PLW", # pylint-warning
+    "RUF100", # Ruff unused-noqa
+    "RUF200", # Ruff check pyproject.toml
+    "S", # flake8-bandit
+    "SLF", # flake8-self
+    "T20", # flake8-print
+]
+
+[tool.ruff.lint.isort]
+section-order = ["future","standard-library","django","third-party","impress","first-party","local-folder"]
+sections = { impress=["core"], django=["django"] }
+extra-standard-library = ["tomllib"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/*" = ["S", "SLF"]
+
+[tool.pytest.ini_options]
+addopts = [
+    "-v",
+    "--cov-report",
+    "term-missing",
+    # Allow test files to have the same name in different directories.
+    "--import-mode=importlib",
+]
+python_files = [
+    "test_*.py",
+    "tests.py",
+]

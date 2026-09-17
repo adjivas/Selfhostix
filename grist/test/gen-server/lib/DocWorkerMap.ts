@@ -1,0 +1,854 @@
+import { UserAPI } from "app/common/UserAPI";
+import { DocWorkerMap, getDocWorkerMap } from "app/gen-server/lib/DocWorkerMap";
+import { Deps } from "app/server/lib/DocWorkerLoadTracker";
+import { DocStatus, DocWorkerInfo, IDocWorkerMap } from "app/server/lib/DocWorkerMap";
+import { FlexServer } from "app/server/lib/FlexServer";
+import { NSandbox } from "app/server/lib/NSandbox";
+import { Permit } from "app/server/lib/Permit";
+import { MergedServer } from "app/server/MergedServer";
+import { TestSession } from "test/gen-server/apiUtils";
+import { createInitialDb, removeConnection, setUpDB } from "test/gen-server/seed";
+import * as testUtils from "test/server/testUtils";
+import { waitForIt } from "test/server/wait";
+
+import { delay, promisifyAll } from "bluebird";
+import { assert, expect } from "chai";
+import { countBy, values } from "lodash";
+import { createClient, RedisClient } from "redis";
+import sinon from "sinon";
+
+promisifyAll(RedisClient.prototype);
+
+describe("DocWorkerMap", function() {
+  let cli: RedisClient;
+
+  testUtils.setTmpLogLevel("error");
+
+  before(async function() {
+    if (!process.env.TEST_REDIS_URL) { this.skip(); }
+    cli = createClient(process.env.TEST_REDIS_URL);
+    await cli.flushdbAsync();
+  });
+
+  after(async function() {
+    if (cli) { await cli.quitAsync(); }
+  });
+
+  for (const GRIST_EXPERIMENTAL_WORKER_ASSIGNMENT of [0, 1]) {
+    describe(`with GRIST_EXPERIMENTAL_WORKER_ASSIGNMENT=${GRIST_EXPERIMENTAL_WORKER_ASSIGNMENT}`, function() {
+      let oldEnv: testUtils.EnvironmentSnapshot;
+
+      before(async function() {
+        oldEnv = new testUtils.EnvironmentSnapshot();
+        process.env.GRIST_EXPERIMENTAL_WORKER_ASSIGNMENT = `${GRIST_EXPERIMENTAL_WORKER_ASSIGNMENT}`;
+      });
+
+      after(async function() {
+        oldEnv.restore();
+      });
+
+      describe("assigment", function() {
+        afterEach(async function() {
+          if (cli) { await cli.flushdbAsync(); }
+        });
+
+        it("can assign a worker when available", async function() {
+          const workers = new DocWorkerMap([cli]);
+
+          // No assignment without workers available
+          await assert.isRejected(workers.assignDocWorker("a-doc"), /no doc workers/);
+
+          // Add a worker
+          await workers.addWorker({ id: "worker1", internalUrl: "internal", publicUrl: "public" });
+
+          // Still no assignment
+          await assert.isRejected(workers.assignDocWorker("a-doc"), /no doc workers/);
+
+          // Make worker available
+          await workers.setWorkerAvailability("worker1", true);
+
+          // That worker gets assigned
+          const worker = await workers.assignDocWorker("a-doc");
+          assert.equal(worker.docWorker.id, "worker1");
+
+          // That assignment is remembered
+          let w = await workers.getDocWorker("a-doc");
+          assert.equal(w?.docWorker.id, "worker1");
+
+          // Make worker unavailable for assigment
+          await workers.setWorkerAvailability("worker1", false);
+
+          // Existing assignment remains
+          w = await workers.getDocWorker("a-doc");
+          assert.equal(w?.docWorker.id, "worker1");
+
+          // Remove worker
+          await workers.removeWorker("worker1");
+
+          // Assignment is gone away
+          w = await workers.getDocWorker("a-doc");
+          assert.equal(w, null);
+        });
+
+        it("can release assignments", async function() {
+          const workers = new DocWorkerMap([cli]);
+
+          await workers.addWorker({ id: "worker1", internalUrl: "internal", publicUrl: "public" });
+          await workers.addWorker({ id: "worker2", internalUrl: "internal", publicUrl: "public" });
+
+          await workers.setWorkerAvailability("worker1", true);
+
+          let assignment: DocStatus | null = await workers.assignDocWorker("a-doc");
+          assert.equal(assignment.docWorker.id, "worker1");
+
+          await workers.setWorkerAvailability("worker2", true);
+          await workers.setWorkerAvailability("worker1", false);
+
+          assignment = await workers.getDocWorker("a-doc");
+          assert.equal(assignment!.docWorker.id, "worker1");
+
+          await workers.releaseAssignment("worker1", "a-doc");
+
+          assignment = await workers.getDocWorker("a-doc");
+          assert.equal(assignment, null);
+
+          assignment = await workers.assignDocWorker("a-doc");
+          assert.equal(assignment.docWorker.id, "worker2");
+        });
+
+        it("can assign multiple workers", async function() {
+          this.timeout(5000);   // Be more generous than 2s default, since this normally takes over 1s.
+
+          const workers = new DocWorkerMap([cli]);
+
+          // Make some workers available
+          const W = 4;
+          for (let i = 0; i < W; i++) {
+            await workers.addWorker({ id: `worker${i}`, internalUrl: "internal", publicUrl: "public" });
+            await workers.setWorkerAvailability(`worker${i}`, true);
+          }
+
+          // Assign some docs
+          const N = 100;
+          const docs: string[] = [];
+          const docWorkers: string[] = [];
+          for (let i = 0; i < N; i++) {
+            const name = `a-doc-${i}`;
+            docs.push(name);
+            const w = await workers.assignDocWorker(name);
+            docWorkers.push(w.docWorker.id);
+          }
+
+          // Check assignment looks plausible (random, so will fail with low prob)
+          const counts = countBy(docWorkers);
+          // Say over half the workers got assigned
+          assert.isAbove(values(counts).length, W / 2);
+          // Say no worker got over half the work
+          const highs = values(counts).filter((k, v) => v > N / 2);
+          assert.equal(highs.length, 0);
+
+          // Check assignments stick
+          for (let i = 0; i < N; i++) {
+            const name = docs[i];
+            const w = await workers.getDocWorker(name);
+            assert.equal(w?.docWorker.id, docWorkers[i]);
+          }
+
+          // Check assignments drop out as workers are removed
+          let remaining = N;
+          for (const w of Object.keys(counts)) {
+            await workers.removeWorker(w);
+            remaining -= counts[w];
+            let ct = 0;
+            for (const name of docs) {
+              if (null !== await workers.getDocWorker(name)) { ct++; }
+            }
+            assert.equal(remaining, ct);
+          }
+          assert.equal(remaining, 0);
+        });
+
+        if (GRIST_EXPERIMENTAL_WORKER_ASSIGNMENT === 1) {
+          it("can assign workers by load", async function() {
+            this.timeout(5000);
+
+            const workerMap = new DocWorkerMap([cli]);
+            const workerCount = 4;
+            const workers = [];
+            for (let i = 1; i <= workerCount; i++) {
+              const worker: DocWorkerInfo = {
+                id: `worker${i}`,
+                internalUrl: "internal",
+                publicUrl: "public",
+              };
+              workers.push(worker);
+              await workerMap.addWorker(worker);
+              await workerMap.setWorkerAvailability(`worker${i}`, true);
+            }
+
+            // Initialize worker load.
+            const workerLoads = [0.0, 0.5, 0.875, 1.0];
+            for (let i = 0; i < workerLoads.length; i++) {
+              await workerMap.setWorkerLoad(workers[i], workerLoads[i]);
+            }
+
+            const assignmentCountByWorkerId = new Map<string, number>();
+            const docCount = 100;
+
+            const assignDocuments = async () => {
+              assignmentCountByWorkerId.clear();
+              for (let i = 1; i <= docCount; i++) {
+                const docId = `doc${i}`;
+                const { docWorker } = await workerMap.assignDocWorker(docId);
+                const count = assignmentCountByWorkerId.get(docWorker.id) ?? 0;
+                assignmentCountByWorkerId.set(docWorker.id, count + 1);
+                // We call this function multiple times, so we need to release
+                // the assignment to prevent it from affecting future calls.
+                await workerMap.releaseAssignment(docWorker.id, docId);
+              }
+            };
+
+            const count = (workerId: string) => {
+              return assignmentCountByWorkerId.get(workerId) ?? 0;
+            };
+
+            // Check that `worker${i}` gets more assignments than `worker${i + 1}`.
+            await assignDocuments();
+            assert.isAbove(count("worker1"), count("worker2"));
+            assert.isAbove(count("worker2"), count("worker3"));
+            assert.isAbove(count("worker3"), count("worker4"));
+            assert.equal(count("worker4"), 0);
+
+            // Set each worker's load to 1.
+            for (let i = 0; i < workerCount; i++) {
+              await workerMap.setWorkerLoad(workers[i], 1);
+            }
+
+            // Check no worker gets over half the work.
+            await assignDocuments();
+            assert.equal(assignmentCountByWorkerId.size, workerCount);
+            assert.isEmpty(
+              [...assignmentCountByWorkerId.values()].filter(
+                v => v > docCount / 2,
+              ),
+            );
+          });
+        }
+
+        it("can assign workers to groups", async function() {
+          this.timeout(5000);
+          const workers = new DocWorkerMap([cli]);
+
+          // Register a few regular workers.
+          for (let i = 0; i < 3; i++) {
+            await workers.addWorker({ id: `worker${i}`, internalUrl: "internal", publicUrl: "public" });
+            await workers.setWorkerAvailability(`worker${i}`, true);
+          }
+
+          // Register a worker in a special group.
+          await workers.addWorker({ id: "worker_secondary", internalUrl: "internal", publicUrl: "public",
+            group: "secondary" });
+          await workers.setWorkerAvailability("worker_secondary", true);
+
+          // Check that worker lists look sane.
+          assert.sameMembers(await cli.smembersAsync("workers"),
+            ["worker0", "worker1", "worker2", "worker_secondary"]);
+          assert.sameMembers(await cli.smembersAsync("workers-available"),
+            ["worker0", "worker1", "worker2"]);
+          assert.sameMembers(await cli.smembersAsync("workers-available-default"),
+            ["worker0", "worker1", "worker2"]);
+          assert.sameMembers(await cli.smembersAsync("workers-available-secondary"),
+            ["worker_secondary"]);
+
+          // Check that worker-*-group keys are as expected.
+          assert.equal(await cli.getAsync("worker-worker_secondary-group"), "secondary");
+          assert.equal(await cli.getAsync("worker-worker0-group"), null);
+
+          // Check that a doc for the special group is assigned to the correct worker.
+          await cli.setAsync("doc-funkydoc-group", "secondary");
+          assert.equal((await workers.assignDocWorker("funkydoc")).docWorker.id, "worker_secondary");
+
+          // Check that other docs don't end up on the special group's worker.
+          for (let i = 0; i < 50; i++) {
+            assert.match((await workers.assignDocWorker(`normaldoc${i}`)).docWorker.id,
+              /^worker\d$/);
+          }
+        });
+
+        it("takes a worker in a group off the lists when it goes", async function() {
+          const workers = new DocWorkerMap([cli]);
+          await workers.addWorker({ id: "worker_secondary", internalUrl: "internal",
+            publicUrl: "public", group: "secondary" });
+          await workers.setWorkerAvailability("worker_secondary", true);
+
+          // Check that the worker is present before removing it, so the
+          // emptiness checks below are meaningful.
+          assert.sameMembers(await cli.smembersAsync("workers"), ["worker_secondary"]);
+          assert.sameMembers(await cli.smembersAsync("workers-available-secondary"), ["worker_secondary"]);
+          assert.sameMembers(await cli.zrangeAsync("workers-available-by-load-secondary", 0, -1),
+            ["worker_secondary"]);
+          assert.isNotEmpty(await cli.hgetallAsync("worker-worker_secondary"));
+          assert.equal(await cli.getAsync("worker-worker_secondary-group"), "secondary");
+
+          await workers.removeWorker("worker_secondary");
+          assert.isEmpty(await cli.smembersAsync("workers"));
+          assert.isEmpty(await cli.smembersAsync("workers-available"));
+          assert.isEmpty(await cli.smembersAsync("workers-available-secondary"));
+          assert.isEmpty(await cli.zrangeAsync("workers-available-by-load-secondary", 0, -1));
+          assert.isEmpty(await cli.hgetallAsync("worker-worker_secondary") || {});
+          assert.equal(await cli.getAsync("worker-worker_secondary-group"), null);
+        });
+      });
+
+      describe("election", function() {
+        it("can manage task election nominations", async function() {
+          this.timeout(5000);
+
+          const store = new DocWorkerMap([cli]);
+          // allocate two tasks
+          const task1 = await store.getElection("task1", 1000);
+          let task2 = await store.getElection("task2", 1000);
+          assert.notEqual(task1, null);
+          assert.notEqual(task2, null);
+          assert.notEqual(task1, task2);
+
+          // check tasks cannot be immediately reallocated
+          assert.equal(await store.getElection("task1", 1000), null);
+          assert.equal(await store.getElection("task2", 1000), null);
+
+          // try to remove both tasks with a key that is correct for just one of them.
+          await assert.isRejected(store.removeElection("task1", task2!), /could not remove/);
+          await store.removeElection("task2", task2!);
+
+          // check task2 is freed up by reallocating it
+          task2 = await store.getElection("task2", 3000);
+          assert.notEqual(task2, null);
+
+          await delay(1100);
+
+          // task1 should be free now, but not task2
+          const task1b = await store.getElection("task1", 1000);
+          assert.notEqual(task1b, null);
+          assert.notEqual(task1b, task1);
+          assert.equal(await store.getElection("task2", 1000), null);
+        });
+
+        it("can manage permits", async function() {
+          const store = new DocWorkerMap([cli], { permitMsec: 1000 }).getPermitStore("1");
+
+          // Make a doc permit and a workspace permit
+          const permit1: Permit = { docId: "docId1" };
+          const key1 = await store.setPermit(permit1);
+          assert(key1.startsWith("permit-1-"));
+          const permit2: Permit = { workspaceId: 99 };
+          const key2 = await store.setPermit(permit2);
+          assert(key2.startsWith("permit-1-"));
+          assert.notEqual(key1, key2);
+
+          // Check we can read the permits back
+          assert.deepEqual(await store.getPermit(key1), permit1);
+          assert.deepEqual(await store.getPermit(key2), permit2);
+
+          // Check that random permit keys give nothing
+          await assert.isRejected(store.getPermit("dud"), /could not be read/);
+          assert.equal(await store.getPermit("permit-1-dud"), null);
+
+          // Check that we can remove a permit
+          await store.removePermit(key1);
+          assert.equal(await store.getPermit(key1), null);
+          assert.deepEqual(await store.getPermit(key2), permit2);
+
+          // Check that permits expire
+          await delay(1100);
+          assert.equal(await store.getPermit(key2), null);
+
+          // make sure permit stores are distinct
+          const store2 = new DocWorkerMap([cli], { permitMsec: 1000 }).getPermitStore("2");
+          const key3 = await store2.setPermit(permit1);
+          assert(key3.startsWith("permit-2-"));
+          const fakeKey3 = key3.replace("permit-2-", "permit-1-");
+          assert(fakeKey3.startsWith("permit-1-"));
+          assert.equal(await store.getPermit(fakeKey3), null);
+          await assert.isRejected(store.getPermit(key3), /could not be read/);
+          assert.deepEqual(await store2.getPermit(key3), permit1);
+          await assert.isRejected(store2.getPermit(fakeKey3), /could not be read/);
+        });
+      });
+
+      describe("group assignment", function() {
+        let servers: { [key: string]: FlexServer };
+        let workers: IDocWorkerMap;
+        before(async function() {
+          // Create a home server and some workers.
+          setUpDB(this);
+          await createInitialDb();
+          const opts = { logToConsole: false, externalStorage: false };
+          // We need to reset some environment variables - we do so
+          // naively, so throw if they are already set.
+          assert.equal(process.env.REDIS_URL, undefined);
+          assert.equal(process.env.GRIST_DOC_WORKER_ID, undefined);
+          assert.equal(process.env.GRIST_WORKER_GROUP, undefined);
+          process.env.REDIS_URL = process.env.TEST_REDIS_URL;
+
+          // Make home server.
+          const homeMergedServer = await MergedServer.create(0, ["home"], opts);
+          const home = homeMergedServer.flexServer;
+          await homeMergedServer.run();
+
+          // Make a worker, not associated with any group.
+          process.env.GRIST_DOC_WORKER_ID = "worker1";
+          const docs1MergedServer = await MergedServer.create(0, ["docs"], opts);
+          const docs1 = docs1MergedServer.flexServer;
+          await docs1MergedServer.run();
+
+          // Make a worker in "special" group.
+          process.env.GRIST_DOC_WORKER_ID = "worker2";
+          process.env.GRIST_WORKER_GROUP = "special";
+          const docs2MergedServer = await MergedServer.create(0, ["docs"], opts);
+          const docs2 = docs2MergedServer.flexServer;
+          await docs2MergedServer.run();
+
+          // Make two worker in "other" group.
+          process.env.GRIST_DOC_WORKER_ID = "worker3";
+          process.env.GRIST_WORKER_GROUP = "other";
+          const docs3MergedServer = await MergedServer.create(0, ["docs"], opts);
+          const docs3 = docs3MergedServer.flexServer;
+          await docs3MergedServer.run();
+          process.env.GRIST_DOC_WORKER_ID = "worker4";
+          process.env.GRIST_WORKER_GROUP = "other";
+          const docs4MergedServer = await MergedServer.create(0, ["docs"], opts);
+          const docs4 = docs4MergedServer.flexServer;
+          await docs4MergedServer.run();
+
+          servers = { home, docs1, docs2, docs3, docs4 };
+          workers = getDocWorkerMap();
+        });
+
+        after(async function() {
+          if (servers) {
+            await Promise.all(Object.values(servers).map(server => server.close()));
+            await removeConnection();
+            delete process.env.REDIS_URL;
+            delete process.env.GRIST_DOC_WORKER_ID;
+            delete process.env.GRIST_WORKER_GROUP;
+            await workers.close();
+          }
+        });
+
+        it("can reassign documents between groups", async function() {
+          this.timeout(15000);
+
+          // Create a test documment.
+          const session = new TestSession(servers.home);
+          const api = await session.createHomeApi("chimpy", "nasa");
+          const supportApi = await session.createHomeApi("support", "docs", true);
+          const ws1 = await api.newWorkspace({ name: "ws1" }, "current");
+          const doc1 = await api.newDoc({ name: "doc1" }, ws1);
+
+          // Exercise it.
+          await api.getDocAPI(doc1).getRows("Table1");
+
+          // Check it is served by only unspecialized worker.
+          assert.equal((await workers.getDocWorker(doc1))?.docWorker.id, "worker1");
+
+          // Set doc to "special" group.
+          await cli.setAsync(`doc-${doc1}-group`, "special");
+
+          // Check doc gets reassigned to correct worker.
+          assert.equal(await (await api.testRequest(`${api.getBaseUrl()}/api/docs/${doc1}/assign`, {
+            method: "POST",
+          })).json(), true);
+          await api.getDocAPI(doc1).getRows("Table1");
+          assert.equal((await workers.getDocWorker(doc1))?.docWorker.id, "worker2");
+
+          // Set doc to "other" group.
+          await cli.setAsync(`doc-${doc1}-group`, "other");
+
+          // Check doc gets reassigned to one of the correct workers.
+          assert.equal(await (await api.testRequest(`${api.getBaseUrl()}/api/docs/${doc1}/assign`, {
+            method: "POST",
+          })).json(), true);
+          await api.getDocAPI(doc1).getRows("Table1");
+          assert.oneOf((await workers.getDocWorker(doc1))?.docWorker.id, ["worker3", "worker4"]);
+
+          // Remove doc from groups.
+          await cli.delAsync(`doc-${doc1}-group`);
+          assert.equal(await (await api.testRequest(`${api.getBaseUrl()}/api/docs/${doc1}/assign`, {
+            method: "POST",
+          })).json(), true);
+          await api.getDocAPI(doc1).getRows("Table1");
+
+          // Check doc is again served by only unspecialized worker.
+          assert.equal((await workers.getDocWorker(doc1))?.docWorker.id, "worker1");
+
+          // Check that hitting /assign without a change of group is reported as no-op (false).
+          assert.equal(await (await api.testRequest(`${api.getBaseUrl()}/api/docs/${doc1}/assign`, {
+            method: "POST",
+          })).json(), false);
+
+          // Check that Chimpy can't use `group` param to update doc group prior to reassignment.
+          const urlWithGroup = new URL(`${api.getBaseUrl()}/api/docs/${doc1}/assign`);
+          urlWithGroup.searchParams.set("group", "special");
+          assert.equal(await (await api.testRequest(urlWithGroup.toString(), {
+            method: "POST",
+          })).json(), false);
+
+          // Check that support user can use `group` param in housekeeping endpoint to update
+          // doc group prior to reassignment.
+          const housekeepingUrl = new URL(`${api.getBaseUrl()}/api/housekeeping/docs/${doc1}/assign`);
+          housekeepingUrl.searchParams.set("group", "special");
+          assert.equal(await (await supportApi.testRequest(housekeepingUrl.toString(), {
+            method: "POST",
+          })).json(), true);
+          await api.getDocAPI(doc1).getRows("Table1");
+          assert.equal((await workers.getDocWorker(doc1))?.docWorker.id, "worker2");
+
+          // Check that hitting housekeeping endpoint with the same group is reported as no-op (false).
+          assert.equal(await (await supportApi.testRequest(housekeepingUrl.toString(), {
+            method: "POST",
+          })).json(), false);
+
+          // Check that specifying a blank group reverts back to the unspecialized worker.
+          housekeepingUrl.searchParams.set("group", "");
+          assert.equal(await (await supportApi.testRequest(housekeepingUrl.toString(), {
+            method: "POST",
+          })).json(), true);
+          await api.getDocAPI(doc1).getRows("Table1");
+          assert.equal((await workers.getDocWorker(doc1))?.docWorker.id, "worker1");
+        });
+      });
+
+      describe("isWorkerRegistered", () => {
+        const baseWorkerInfo: DocWorkerInfo = {
+          id: "workerId",
+          internalUrl: "internalUrl",
+          publicUrl: "publicUrl",
+          group: undefined,
+        };
+
+        [
+          {
+            itMsg: "should check if worker is registered",
+            sisMemberAsyncResolves: 1,
+            expectedResult: true,
+            expectedKey: "workers-available-default",
+          },
+          {
+            itMsg: "should check if worker is registered in a certain group",
+            sisMemberAsyncResolves: 1,
+            group: "dummygroup",
+            expectedResult: true,
+            expectedKey: "workers-available-dummygroup",
+          },
+          {
+            itMsg: "should return false if worker is not registered",
+            sisMemberAsyncResolves: 0,
+            expectedResult: false,
+            expectedKey: "workers-available-default",
+          },
+        ].forEach((ctx) => {
+          it(ctx.itMsg, async () => {
+            const sismemberAsyncStub = sinon.stub().resolves(ctx.sisMemberAsyncResolves);
+            const stubDocWorkerMap = {
+              _client: { sismemberAsync: sismemberAsyncStub },
+            };
+            const result = await DocWorkerMap.prototype.isWorkerRegistered.call(
+              stubDocWorkerMap, { ...baseWorkerInfo, group: ctx.group },
+            );
+            expect(result).to.equal(ctx.expectedResult);
+            expect(sismemberAsyncStub.calledOnceWith(ctx.expectedKey, baseWorkerInfo.id)).to.equal(true);
+          });
+        });
+      });
+
+      if (GRIST_EXPERIMENTAL_WORKER_ASSIGNMENT === 1) {
+        describe("load", function() {
+          const MEMORY_PER_DOC_MB = 50;
+          const MAX_MEMORY_MB = 1024;
+
+          let servers: { [key: string]: FlexServer };
+          let workers: IDocWorkerMap;
+          let oldEnv: testUtils.EnvironmentSnapshot;
+          let sandbox: sinon.SinonSandbox;
+          let session: TestSession;
+          let api: UserAPI;
+          let wsId: number;
+          let docId: string;
+
+          before(async function() {
+            sandbox = sinon.createSandbox();
+            sandbox
+              .stub(NSandbox.prototype, "reportMemoryUsage")
+              .returns(Promise.resolve(MEMORY_PER_DOC_MB * 1024 * 1024));
+            sandbox.stub(Deps, "docWorkerMaxMemoryMBForcedValue").value(MAX_MEMORY_MB);
+            sandbox.stub(Deps, "docWorkerUpdateLoadIntervalMs").value(50);
+            sandbox.stub(Deps, "docWorkerUpdateLoadVarianceMs").value(0);
+
+            setUpDB(this);
+            await createInitialDb();
+
+            oldEnv = new testUtils.EnvironmentSnapshot();
+            process.env.REDIS_URL = process.env.TEST_REDIS_URL;
+            process.env.GRIST_WORKER_GROUP = "default";
+
+            const opts = { logToConsole: false, externalStorage: false };
+            const homeMergedServer = await MergedServer.create(0, ["home"], opts);
+            const home = homeMergedServer.flexServer;
+            await homeMergedServer.run();
+            servers = { home };
+            for (let i = 1; i <= 3; i++) {
+              const workerId = `worker${i}`;
+              process.env.GRIST_DOC_WORKER_ID = workerId;
+              const docsMergedServer = await MergedServer.create(0, ["docs"], opts);
+              servers[workerId] = docsMergedServer.flexServer;
+              await docsMergedServer.run();
+            }
+
+            workers = getDocWorkerMap();
+
+            session = new TestSession(servers.home);
+            api = await session.createHomeApi("chimpy", "nasa", true);
+            wsId = await api.newWorkspace({ name: "ws" }, "current");
+            docId = await api.newDoc({ name: "doc" }, wsId);
+          });
+
+          after(async function() {
+            oldEnv.restore();
+            sandbox.restore();
+
+            if (servers) {
+              await Promise.all(Object.values(servers).map(server => server.close()));
+              await removeConnection();
+              await workers.close();
+            }
+          });
+
+          it("initializes when worker is added", async function() {
+            const availableWorkersByLoad = await cli.zrangeAsync(
+              "workers-available-by-load-default",
+              0,
+              -1,
+              "WITHSCORES",
+            );
+            assert.deepEqual(availableWorkersByLoad, [
+              "worker1",
+              "0",
+              "worker2",
+              "0",
+              "worker3",
+              "0",
+            ]);
+          });
+
+          it("updates after document is opened or closed", async function() {
+            this.timeout(10000);
+
+            // Open a document.
+            await api.getDocAPI(docId).getRows("Table1");
+            const workerId = (await workers.getDocWorker(docId))!.docWorker.id;
+
+            // After 50 ms or so, load should reflect the opened document.
+            await waitForIt(async () => {
+              const load = await cli.zscoreAsync(`workers-available-by-load-default`, workerId);
+              assert.equal(load, MEMORY_PER_DOC_MB / MAX_MEMORY_MB);
+            }, 250, 50);
+
+            // Shut down all open documents. Load should reset soon after.
+            await Promise.all(Object.values(servers).map(server => server.testCloseDocs()));
+            await waitForIt(async () => {
+              const load = await cli.zscoreAsync(`workers-available-by-load-default`, workerId);
+              assert.equal(load, 0.0);
+            }, 250, 50);
+
+            // Now try opening a number of documents at once.
+            const docCount = 10;
+            const createDocPromises = [];
+            for (let i = 1; i <= docCount; i++) {
+              createDocPromises.push(api.newDoc({ name: "doc" }, wsId));
+            }
+            const docIds = await Promise.all(createDocPromises);
+            await Promise.all(docIds.map(docId => api.getDocAPI(docId).getRows("Table1")));
+
+            // After 50 ms or so, load should reflect the opened documents.
+            await waitForIt(async () => {
+              let totalLoad = 0;
+              let numWorkersWithAssignments = 0;
+              for (const workerId of ["worker1", "worker2", "worker3"]) {
+                const load = await cli.zscoreAsync("workers-available-by-load-default", workerId);
+                if (load) {
+                  totalLoad += Number(load);
+                  numWorkersWithAssignments += 1;
+                }
+              }
+              assert.equal(totalLoad, (MEMORY_PER_DOC_MB * docCount) / MAX_MEMORY_MB);
+              assert.isAbove(numWorkersWithAssignments, 1);
+            }, 250, 50);
+
+            // Shut down all open documents. Load should reset soon after.
+            await Promise.all(Object.values(servers).map(server => server.testCloseDocs()));
+            await waitForIt(async () => {
+              const availableWorkersByLoad = await cli.zrangeAsync(
+                "workers-available-by-load-default",
+                0,
+                -1,
+                "WITHSCORES",
+              );
+              assert.deepEqual(availableWorkersByLoad, [
+                "worker1",
+                "0",
+                "worker2",
+                "0",
+                "worker3",
+                "0",
+              ]);
+            }, 250, 50);
+          });
+        });
+      }
+    });
+  }
+
+  describe("worker liveness", function() {
+    let workers: DocWorkerMap;
+    let oldEnv: testUtils.EnvironmentSnapshot;
+
+    const workerA: DocWorkerInfo = {
+      id: "aliveTestWorkerA",
+      publicUrl: "http://a.example.com",
+      internalUrl: "http://10.0.0.1:8484",
+    };
+
+    before(function() {
+      oldEnv = new testUtils.EnvironmentSnapshot();
+      // The claim lasts a few turns of the timer that reports it, so its lifetime follows this.
+      process.env.GRIST_DOC_WORKER_UPDATE_LOAD_INTERVAL_MS = "5000";
+      workers = new DocWorkerMap([cli]);
+    });
+
+    after(function() {
+      oldEnv.restore();
+    });
+
+    afterEach(async function() {
+      if (cli) { await cli.flushdbAsync(); }
+    });
+
+    it("says nothing was heard from a registration nothing is behind", async function() {
+      // What a worker killed without deregistering leaves, an entry that looks like any other.
+      await cli.hmsetAsync(`worker-${workerA.id}`, { ...workerA });
+      await cli.saddAsync("workers", workerA.id);
+      assert.isFalse(await workers.isWorkerAlive(workerA.id));
+    });
+
+    it("says nothing was heard once a worker stops saying", async function() {
+      await workers.addWorker(workerA);
+      await workers.recordWorkerAlive(workerA.id);
+      assert.isTrue(await workers.isWorkerAlive(workerA.id));
+      // Left to expire, rather than kept until something clears it. Five turns of the timer that
+      // reports it, which is 25 seconds where the interval is left at its default.
+      assert.equal(await cli.ttlAsync(`worker-${workerA.id}-alive`), 25);
+
+      await cli.delAsync(`worker-${workerA.id}-alive`);
+      assert.isFalse(await workers.isWorkerAlive(workerA.id));
+    });
+
+    it("forgets what a worker said when it goes", async function() {
+      await workers.addWorker(workerA);
+      await workers.recordWorkerAlive(workerA.id);
+
+      await workers.removeWorker(workerA.id);
+      assert.equal(await cli.existsAsync(`worker-${workerA.id}-alive`), 0);
+      assert.isFalse(await workers.isWorkerAlive(workerA.id));
+    });
+
+    it("records the load and the claim in one call", async function() {
+      // The load half is an update of an entry already there, which does nothing at all where the
+      // worker is not in that set, so it is asserted on the key rather than on the call.
+      await workers.addWorker(workerA);
+      await workers.setWorkerAvailability(workerA.id, true);
+
+      await workers.setWorkerLoad(workerA, 0.25);
+      assert.isTrue(await workers.isWorkerAlive(workerA.id));
+      assert.equal(await cli.ttlAsync(`worker-${workerA.id}-alive`), 25);
+      assert.equal(
+        Number(await cli.zscoreAsync("workers-available-by-load-default", workerA.id)), 0.25);
+    });
+  });
+
+  describe("worker registrations", function() {
+    let workers: DocWorkerMap;
+
+    const workerA: DocWorkerInfo = {
+      id: "registeredWorkerA",
+      publicUrl: "http://a.example.com",
+      internalUrl: "http://10.0.0.1:8484",
+    };
+
+    before(function() {
+      workers = new DocWorkerMap([cli]);
+    });
+
+    afterEach(async function() {
+      await cli.flushdbAsync();
+    });
+
+    it("reports nothing when no worker is registered", async function() {
+      assert.deepEqual(await workers.getRegisteredWorkers(), []);
+    });
+
+    it("describes every registered worker", async function() {
+      await workers.addWorker(workerA);
+      await workers.setWorkerAvailability(workerA.id, true);
+      await workers.assignDocWorker("registrationTestDoc");
+
+      const registered = await workers.getRegisteredWorkers();
+      assert.lengthOf(registered, 1);
+      assert.equal(registered[0].info.id, workerA.id);
+      assert.equal(registered[0].info.internalUrl, workerA.internalUrl);
+      assert.isTrue(registered[0].available);
+      assert.equal(registered[0].assignmentCount, 1);
+    });
+
+    it("reports a worker that is registered but not taking documents", async function() {
+      await workers.addWorker(workerA);
+      await workers.setWorkerAvailability(workerA.id, false);
+
+      const registered = await workers.getRegisteredWorkers();
+      assert.lengthOf(registered, 1);
+      assert.isFalse(registered[0].available);
+      assert.equal(registered[0].assignmentCount, 0);
+      // No place in the by-load set means no load to report, as against a load of zero.
+      assert.isUndefined(registered[0].load);
+    });
+
+    it("reports the load the assignment algorithm weighs a worker by", async function() {
+      await workers.addWorker(workerA);
+      await workers.setWorkerAvailability(workerA.id, true);
+      assert.equal((await workers.getRegisteredWorkers())[0].load, 0);
+
+      await workers.setWorkerLoad(workerA, 0.25);
+      // Redis hands scores back as strings, so this catches the parse as much as the plumbing.
+      assert.strictEqual((await workers.getRegisteredWorkers())[0].load, 0.25);
+    });
+
+    it("says whether each worker is still saying it is running", async function() {
+      await workers.addWorker(workerA);
+      await workers.setWorkerAvailability(workerA.id, true);
+      await workers.recordWorkerAlive(workerA.id);
+      assert.isTrue((await workers.getRegisteredWorkers())[0].alive);
+
+      await cli.delAsync(`worker-${workerA.id}-alive`);
+      assert.isFalse((await workers.getRegisteredWorkers())[0].alive);
+    });
+
+    it("reports a worker in the group its availability sits in", async function() {
+      await workers.addWorker({ ...workerA, group: "chosen" });
+      await workers.setWorkerAvailability(workerA.id, true);
+      await workers.setWorkerLoad({ ...workerA, group: "chosen" }, 0.5);
+
+      const registered = await workers.getRegisteredWorkers();
+      assert.equal(registered[0].info.group, "chosen");
+      assert.equal(registered[0].load, 0.5);
+    });
+  });
+});

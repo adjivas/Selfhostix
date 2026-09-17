@@ -1,0 +1,1438 @@
+import { buildHomeBanners } from "app/client/components/Banners";
+import { makeT } from "app/client/lib/localization";
+import { markdown } from "app/client/lib/markdown";
+import { getTimeFromNow } from "app/client/lib/timeUtils";
+import { AdminCheckRequest, AdminChecks, ProbeDetails } from "app/client/models/AdminChecks";
+import { AppModel, getHomeUrl, reportError } from "app/client/models/AppModel";
+import { AuditLogsModel, AuditLogsModelImpl } from "app/client/models/AuditLogsModel";
+import { urlState } from "app/client/models/gristUrlState";
+import { AccountWidget } from "app/client/ui/AccountWidget";
+import { cssEmail, cssUserInfo, cssUserName } from "app/client/ui/AccountWidgetCss";
+import { buildAdminAccessDeniedCard } from "app/client/ui/AdminAccessDeniedCard";
+import { buildAdminData } from "app/client/ui/AdminControls";
+import { buildAdminLeftPanel, getPageNames } from "app/client/ui/AdminLeftPanel";
+import {
+  cssDangerText,
+  cssErrorText,
+  cssFlexSpace,
+  cssHappyText,
+  cssIconWrapper as cssWellIcon,
+  cssPageContainer,
+  cssWell,
+  cssWellContent,
+  cssWellTitle,
+  HidableToggle,
+} from "app/client/ui/AdminPanelCss";
+import { getAdminPanelName } from "app/client/ui/AdminPanelName";
+import { buildSetupRequestsItem } from "app/client/ui/AdminSetupRequests";
+import { App } from "app/client/ui/App";
+import { AuditLogStreamingConfig, getDestinationDisplayName } from "app/client/ui/AuditLogStreamingConfig";
+import { AuthenticationSection } from "app/client/ui/AuthenticationSection";
+import { BackupsSection } from "app/client/ui/BackupsSection";
+import { BaseUrlSection } from "app/client/ui/BaseUrlSection";
+import { BootKeyStatus } from "app/client/ui/BootKeyStatus";
+import { InstallConfigsAPI } from "app/client/ui/ConfigsAPI";
+import { DraftChangesManager } from "app/client/ui/DraftChanges";
+import { EditionSection, editionSwitchModal, editionSwitchWarning } from "app/client/ui/EditionSection";
+import { peekSetupReturnFromGetGristCom } from "app/client/ui/GetGristComProvider";
+import { buildOutgoingRequestsPanel, buildOutgoingRequestsSummary } from "app/client/ui/OutgoingRequestsStatus";
+import { pagePanels } from "app/client/ui/PagePanels";
+import {
+  buildPermissionsCard,
+  buildPermissionsStatusDisplay,
+} from "app/client/ui/PermissionsSetupSection";
+import { PermissionsToggleModel } from "app/client/ui/PermissionsToggleModel";
+import { QuickSetup } from "app/client/ui/QuickSetup";
+import { SandboxSetupSection } from "app/client/ui/SandboxSection";
+import { ServiceStatus } from "app/client/ui/ServiceStatus";
+import {
+  cssPageTitle,
+  cssSection,
+  cssSectionTag,
+  cssSectionTitle,
+  cssValueLabel,
+  focusAdminItem,
+  SectionCard,
+  SectionItem,
+} from "app/client/ui/SettingsLayout";
+import { SupportGristPage } from "app/client/ui/SupportGristPage";
+import { createTopBarHome } from "app/client/ui/TopBar";
+import { createUserImage } from "app/client/ui/UserImage";
+import { fullBreadcrumbs } from "app/client/ui2018/breadcrumbs";
+import { basicButton, bigBasicButton, bigPrimaryButton } from "app/client/ui2018/buttons";
+import { testId, theme } from "app/client/ui2018/cssVars";
+import { icon } from "app/client/ui2018/icons";
+import { cssLink, makeLinks } from "app/client/ui2018/links";
+import { confirmModal, spinnerModal } from "app/client/ui2018/modals";
+import { toggleSwitch } from "app/client/ui2018/toggleSwitch";
+import { BootProbeInfo, BootProbeResult, SandboxingBootProbeDetails } from "app/common/BootProbe";
+import { ConfigAPI } from "app/common/ConfigAPI";
+import { delay } from "app/common/delay";
+import {
+  ADMIN_PANEL_EDITION_ANCHOR,
+  AdminPanelPage,
+  commonUrls,
+  FULL_EDITION,
+  getPageTitleSuffix,
+  GristEdition,
+  LatestVersionAvailable,
+} from "app/common/gristUrls";
+import { useBindable } from "app/common/gutil";
+import { InstallAPI, InstallAPIImpl } from "app/common/InstallAPI";
+import { BOOT_KEY_PROVIDER_KEY, MINIMAL_PROVIDER_KEY } from "app/common/loginProviders";
+import { InstallAdminInfo } from "app/common/LoginSessionAPI";
+import { getAdminConfig, getGristConfig } from "app/common/urlUtils";
+import * as version from "app/common/version";
+
+import {
+  BindableValue,
+  Computed,
+  Disposable,
+  dom,
+  IDisposable,
+  keyframes,
+  MultiHolder,
+  Observable,
+  styled,
+  UseCBOwner,
+} from "grainjs";
+
+const t = makeT("AdminPanel");
+
+// A fortnight of milliseconds is the default time after which we
+// consider a version check to be stale. It's a big number, but we're
+// still far away from the max at Number.MAX_SAFE_INTEGER
+const STALE_VERSION_CHECK_TIME_IN_MS = 14 * 24 * 60 * 60 * 1000;
+
+function isInstallationPage(page: AdminPanelPage): boolean {
+  return page === "admin" || page === "setup";
+}
+
+/**
+ * Shared restart-banner state so the left-panel "Apply changes" entry can
+ * reflect banner visibility and trigger a scroll-into-view + flash.
+ */
+export interface RestartBannerController {
+  isVisible: Observable<boolean>;
+  /** Registered by the banner's DOM to receive focus() calls. */
+  bannerElem: { current: HTMLElement | null };
+  /** Scroll the banner into view and briefly highlight it. */
+  focus(): void;
+}
+
+function createRestartBannerController(owner: Disposable): RestartBannerController {
+  const bannerElem: { current: HTMLElement | null } = { current: null };
+  return {
+    isVisible: Observable.create(owner, false),
+    bannerElem,
+    focus() {
+      const el = bannerElem.current;
+      if (!el) { return; }
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      el.classList.remove("-flash");
+      // Force reflow so the animation restarts if it's already set.
+      void el.offsetWidth;
+      el.classList.add("-flash");
+    },
+  };
+}
+
+export class AdminPanel extends Disposable {
+  private _page = Computed.create<AdminPanelPage>(this, use => use(urlState().state).adminPanel || "admin");
+  private _restartBanner = createRestartBannerController(this);
+
+  constructor(private _appModel: AppModel, private _appObj: App) {
+    super();
+    document.title = getAdminPanelName() + getPageTitleSuffix(getGristConfig());
+    // Full-page replace (not pushUrl) so /admin/setup loads with the
+    // wizard chrome instead of the admin panel's left sidebar.
+    if (this._page.get() === "admin" && peekSetupReturnFromGetGristCom()) {
+      window.location.replace(urlState().makeUrl({ adminPanel: "setup" }));
+      return;
+    }
+  }
+
+  public buildDom() {
+    const leftPanel = buildAdminLeftPanel(this, this._appModel, this._restartBanner);
+
+    // When left panel is fully hidden, hide breadcrumbs and extra buttons so top bar is mostly empty.
+    const width = leftPanel.collapsedWidth;
+    const minimal = Computed.create(this, use => width ? useBindable(use, width) === 0 : false);
+
+    return pagePanels({
+      leftPanel,
+      headerMain: this._buildMainHeader(minimal),
+      contentTop: buildHomeBanners(this._appModel),
+      contentMain: this._buildMainContent(),
+      app: this._appObj,
+    });
+  }
+
+  private _buildMainHeader(minimal: BindableValue<boolean> = false) {
+    const pageNames = getPageNames();
+    return dom.domComputed(minimal, (m) => {
+      if (m) {
+        return [
+          cssFlexSpace(),
+          dom.create(AccountWidget, this._appModel),
+        ];
+      } else {
+        return [
+          fullBreadcrumbs(
+            cssLink(urlState().setLinkUrl({}), t("Home")),
+            getAdminPanelName(),
+            dom.domComputed(this._page, page => pageNames.pages[page].name),
+          ),
+          createTopBarHome(this._appModel),
+        ];
+      }
+    });
+  }
+
+  private _buildMainContent() {
+    return cssPageContainer(
+      // Setting tabIndex allows selecting and copying text. This is helpful on admin pages, e.g.
+      // to copy GRIST_BOOT_KEY or version number. But we don't set it for buidAdminData() pages
+      // because it messes with focus in GridViews, and its unclear how to undo its effect.
+      dom.attr("tabindex", use => isInstallationPage(use(this._page)) ? "-1" : null),
+
+      dom.domComputed(this._page, (page) => {
+        if (page === "admin") {
+          return dom.create(AdminInstallationPanel, this._appModel, this._restartBanner);
+        } else if (page === "setup") {
+          return dom.create(QuickSetup, this._appModel);
+        } else {
+          return dom.create(buildAdminData, this._appModel);
+        }
+      }),
+
+      cssPageContainer.cls("-admin-pages", use => !isInstallationPage(use(this._page))),
+
+      testId("admin-panel"),
+    );
+  }
+}
+
+class AdminInstallationPanel extends Disposable {
+  // Sticky flag: true after the user has applied changes without a restart
+  // in an environment that doesn't support auto-restart. Keeps the manual
+  // restart reminder on screen until the user reloads the page. Cleared only
+  // by a full page reload (see reloadSafe at the bottom of this file).
+  private _awaitingManualRestart = Observable.create<boolean>(this, false);
+  private _supportsRestart = !!getAdminConfig().runningUnderSupervisor;
+  private _baseUrlSection = BaseUrlSection.create(this, { inAdminPanel: true });
+  private _editionSection = EditionSection.create(this, {
+    inAdminPanel: true,
+    notifier: this._appModel.notifier,
+    onEditionSwitch: edition => this._confirmEditionSwitch(edition),
+  });
+
+  // Hide telemetry toggle, as the admin panel exposes it through SupportGristPage
+  private _permissionsModel = PermissionsToggleModel.create(this, { excludeToggles: ["telemetry"] });
+
+  private _drafts = DraftChangesManager.create(this);
+
+  private _checks: AdminChecks;
+  private readonly _installAPI: InstallAPI = new InstallAPIImpl(getHomeUrl());
+  private readonly _configAPI: ConfigAPI = new ConfigAPI(getHomeUrl());
+  private _authCheck: Observable<AdminCheckRequest | undefined>;
+  private _loginProvider: Observable<string | undefined>;
+  // Created in the constructor body since it depends on `_loginProvider`,
+  // which is itself initialized after `_checks`. Undefined when there is
+  // no signed-in admin user -- the section reads the user's email at
+  // construction time and the "no valid user" admin path renders
+  // alternative content that doesn't need the section anyway.
+  private _authSection: AuthenticationSection | undefined;
+  private _sandboxSection: SandboxSetupSection;
+
+  // Banner visibility: shown when a tracked section has restart-required
+  // pending changes, or the user has applied changes without a restart and
+  // still owes us one. Non-restart drafts don't surface the banner.
+  private _showRestartBanner = Computed.create(this, use =>
+    use(this._drafts.needsRestart) ||
+    use(this._awaitingManualRestart),
+  );
+
+  constructor(private _appModel: AppModel, private _restartBanner: RestartBannerController) {
+    super();
+    this._checks = new AdminChecks(this, this._installAPI);
+
+    this._authCheck = Computed.create(this, (use) => {
+      return this._checks.requestCheckById(use, "authentication");
+    });
+    this._loginProvider = this._checks.buildLoginProviderObs(this);
+
+    if (this._appModel.currentValidUser) {
+      this._authSection = AuthenticationSection.create(this, {
+        appModel: this._appModel,
+        loginSystemId: this._loginProvider,
+        inAdminPanel: true,
+        installAPI: this._installAPI,
+      });
+    }
+
+    this._sandboxSection = SandboxSetupSection.create(this, this._checks, { inAdminPanel: true });
+
+    this._drafts.addSection(this._baseUrlSection);
+    this._drafts.addSection(this._editionSection);
+    this._drafts.addSection(this._permissionsModel);
+    this._drafts.addSection(this._sandboxSection.draftSection);
+    if (this._authSection) {
+      this._drafts.addSection(this._authSection);
+    }
+
+    // Mirror visibility into the shared controller so the left-panel entry
+    // appears/disappears with the banner.
+    this._restartBanner.isVisible.set(this._showRestartBanner.get());
+    this.autoDispose(this._showRestartBanner.addListener(v => this._restartBanner.isVisible.set(v)));
+  }
+
+  public buildDom() {
+    if (!this._appModel.currentValidUser) {
+      return this._buildMainContentForOthers();
+    }
+
+    this._checks.fetchAvailableChecks().catch((err) => {
+      reportError(err);
+    });
+
+    // If probes are available, show the panel as normal.
+    // Otherwise say it is unavailable, and describe a fallback
+    // mechanism for access.
+    return dom.maybe(use => use(this._checks.probes), probes => [
+      probes.length > 0 ?
+        this._buildMainContentForAdmin() :
+        this._buildMainContentForOthers(),
+    ]);
+  }
+
+  public async restartGrist(): Promise<void> {
+    const editionSwitch = this._editionSection.pendingEditionSwitch();
+
+    confirmModal(
+      t("Restart Grist?"),
+      t("Restart"),
+      () => {
+        // Fire-and-forget so modal closes immediately; otherwise it
+        // hangs on top of the spinner for the whole restart duration.
+        const restarting = this._performRestart();
+        (editionSwitch ?
+          editionSwitchModal(restarting) :
+          spinnerModal(t("Restarting Grist..."), restarting)
+        ).catch(err => reportError(err as Error));
+      },
+      {
+        explanation: dom("div",
+          dom("p", t("Are you sure you want to restart Grist?")),
+          editionSwitch ?
+            editionSwitchWarning(editionSwitch) :
+            dom("p", t("This will apply any pending changes and briefly interrupt access for all users.")),
+        ),
+      },
+    );
+  }
+
+  private _confirmEditionSwitch(edition: GristEdition) {
+    const otherChanges = this._drafts.changes.get();
+    const canRestart = this._supportsRestart;
+
+    confirmModal(
+      edition === FULL_EDITION ? t("Switch to full Grist?") : t("Switch to Community edition?"),
+      canRestart ? t("Restart") : t("Apply changes"),
+      () => {
+        this._editionSection.selectEdition(edition);
+        if (canRestart) {
+          // Fire-and-forget so modal closes immediately; otherwise it
+          // hangs on top of the spinner for the whole restart duration.
+          editionSwitchModal(this._performRestart()).catch(err => reportError(err as Error));
+        } else {
+          // Fire-and-forget so _applyWithoutRestart opens its own spinner and
+          // reports its own errors.
+          void this._applyWithoutRestart();
+        }
+      },
+      {
+        explanation: dom("div",
+          canRestart ? editionSwitchWarning(edition) : dom("p", t("Grist is running in an \
+environment that doesn't support restarting from the admin panel. Your change will be saved \
+now, and takes effect the next time you restart Grist manually.")),
+          otherChanges.length === 0 ? null : [
+            dom("p", t("This will also apply your other pending changes:")),
+            cssDraftChangesList(otherChanges.map(c => dom("li",
+              cssDraftChangeLabel(c.label + ":"),
+              " ",
+              dom("span", c.value),
+            ))),
+          ],
+          testId("admin-panel-edition-switch-modal"),
+        ),
+      },
+    );
+  }
+
+  private async _performRestart() {
+    // When a section needs a restart, DraftChangesManager handles the
+    // apply+restart+wait cycle. Otherwise the banner was shown because the
+    // user previously applied without restart and still owes us one, so we
+    // restart directly.
+    if (this._drafts.needsRestart.get()) {
+      const result = await this._drafts.applyAll();
+      // A section's afterApply may have already navigated us elsewhere
+      // (e.g. auth changes redirect through sign-in). Don't clobber that
+      // with a reload.
+      if (result?.redirected) { return; }
+    } else {
+      await this._configAPI.restartServer();
+      if (!await this._configAPI.waitUntilReady()) {
+        await reloadSafe();
+        return;
+      }
+    }
+    await reloadSafe();
+  }
+
+  private async _applyWithoutRestart() {
+    try {
+      await spinnerModal(t("Saving..."), this._drafts.applyWithoutRestart());
+      // Stays on until the page is reloaded by the user (see reloadSafe()).
+      this._awaitingManualRestart.set(true);
+    } catch (err) {
+      reportError(err as Error);
+    }
+  }
+
+  private async _dismissChanges() {
+    if (!this._drafts.hasDraftChanges.get()) { return; }
+    confirmModal(
+      t("Dismiss pending changes?"),
+      t("Dismiss"),
+      async () => {
+        try {
+          await spinnerModal(t("Dismissing..."), this._drafts.dismissAll());
+        } catch (err) {
+          reportError(err as Error);
+        }
+      },
+      {
+        explanation: dom("p", t("Any pending changes will be cleared.")),
+      },
+    );
+  }
+
+  /**
+   * Show something helpful to those without access to the panel,
+   * which could include a legit administrator if auth is misconfigured.
+   */
+  private _buildMainContentForOthers() {
+    return buildAdminAccessDeniedCard();
+  }
+
+  private _buildMainContentForAdmin() {
+    const supportGrist = SupportGristPage.create(this, this._appModel);
+
+    return [
+      cssPageTitle(t("Installation")),
+      dom.maybe(this._showRestartBanner, () => cssRestartBannerShell(
+        (elem) => {
+          this._restartBanner.bannerElem.current = elem;
+          // Without the slide-in, confirming (e.g.) Base URL shoves the
+          // user's focal section down by ~150px in one layout step -- the
+          // thing they just clicked jumps away from their cursor. Nested
+          // rAF lets the closed state paint first so the grid-rows
+          // transition has a "from" frame to interpolate against.
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => elem.classList.add("-open")),
+          );
+        },
+        cssRestartBanner(
+          cssSectionTitle(t("Restart Grist")),
+          dom.domComputed(this._awaitingManualRestart, waiting =>
+            dom("p", waiting ?
+              t("Changes have been saved. Restart Grist to apply them.") :
+              t("Restart Grist to apply pending changes.")),
+          ),
+          dom.domComputed(this._drafts.changes, (changes) => {
+            if (changes.length === 0) { return null; }
+            return cssDraftChangesList(
+              changes.map(c => dom("li",
+                cssDraftChangeLabel(c.label + ":"),
+                " ",
+                dom("span", c.value),
+              )),
+              testId("admin-panel-draft-changes"),
+            );
+          }),
+          cssWell(
+            cssWell.cls("-warning"),
+            cssWellIcon(icon("Warning")),
+            dom("div",
+              cssWellTitle(t("Restart unavailable")),
+              cssWellContent(
+                dom("p",
+                  t(`Grist is running in an environment that doesn't support restarting from the admin panel.`),
+                ),
+                dom("p",
+                  t("Please restart Grist manually."),
+                  testId("admin-panel-restart-unsupported-warning"),
+                ),
+                // Allow persisting pending changes to the DB so a manual
+                // restart picks them up.
+                dom.maybe(this._drafts.hasDraftChanges, () =>
+                  dom("p",
+                    basicButton(
+                      t("Apply changes (manual restart required)"),
+                      dom.on("click", () => this._applyWithoutRestart()),
+                      testId("admin-panel-apply-no-restart"),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            dom.hide(this._supportsRestart),
+          ),
+          cssRestartButtonRow(
+            bigPrimaryButton(
+              t("Restart Grist"),
+              dom.on("click", () => this.restartGrist()),
+              testId("admin-panel-restart-button"),
+              dom.show(this._supportsRestart),
+            ),
+            dom.maybe(this._drafts.hasDraftChanges, () =>
+              bigBasicButton(
+                t("Dismiss changes"),
+                dom.on("click", () => this._dismissChanges()),
+                testId("admin-panel-dismiss-button"),
+              ),
+            ),
+          ),
+        ),
+      )),
+      this._buildEditionCard(),
+      SectionCard(t("Support Grist"), [
+        SectionItem({
+          id: "telemetry",
+          name: t("Telemetry"),
+          description: t("Help us make Grist better"),
+          value: dom.create(
+            HidableToggle,
+            supportGrist.getTelemetryOptInObservable(),
+            { labelId: "admin-panel-item-description-telemetry" },
+          ),
+          expandedContent: supportGrist.buildTelemetrySection(),
+        }),
+        SectionItem({
+          id: "sponsor",
+          name: t("Sponsor"),
+          description: t("Support Grist Labs on GitHub"),
+          value: supportGrist.buildSponsorshipSmallButton(),
+          expandedContent: supportGrist.buildSponsorshipSection(),
+        }),
+      ]),
+      SectionCard(t("Server"), [
+        SectionItem({
+          id: "base-url",
+          name: t("Base URL"),
+          description: t("The URL where users and integrations reach this Grist server"),
+          value: this._baseUrlSection.buildStatusDisplay(),
+          expandedContent: this._baseUrlSection.buildDom(),
+        }),
+        SectionItem({
+          id: "version",
+          name: t("Version"),
+          description: t("Current version of Grist"),
+          value: cssValueLabel(t("Version {{versionNumber}}", { versionNumber: version.version })),
+        }),
+        dom.create(this._buildUpdates.bind(this)),
+        // Setup steps users have asked for (via the nudge in Document Settings).
+        // Renders nothing when there are no requests.
+        dom.create(buildSetupRequestsItem, this._appModel),
+        SectionItem({
+          id: "service-status",
+          name: t("Service status"),
+          description: t("Take Grist out of service for maintenance"),
+          value: this._buildServiceStatusDisplay(),
+          expandedContent: this._buildServiceStatusContent(),
+        }),
+        SectionItem({
+          id: "restart",
+          name: t("Restart"),
+          description: t("Restart the Grist server"),
+          value: this._supportsRestart ?
+            basicButton(t("Restart"),
+              dom.on("click", () => this.restartGrist()),
+              testId("admin-panel-restart-item"),
+            ) :
+            cssValueLabel(t("unavailable")),
+        }),
+      ]),
+      SectionCard(t("Security Settings"), [
+        SectionItem({
+          id: "admins",
+          name: t("Administrative accounts"),
+          description: t("The users with administrative accounts"),
+          value: this._buildAdminUsersDisplay(),
+          expandedContent: this._buildAdminUsersDetail(),
+        }),
+        SectionItem({
+          id: "boot-key",
+          name: t("Boot key"),
+          description: t("Fallback authentication method"),
+          value: this._buildBootKeyDisplay(),
+          expandedContent: this._buildBootKeyContent(),
+        }),
+        SectionItem({
+          id: "sandboxing",
+          name: t("Sandboxing"),
+          description: t("Sandbox settings for data engine"),
+          value: this._buildSandboxingDisplay(),
+          expandedContent: this._sandboxSection.buildDom(),
+        }),
+        SectionItem({
+          id: "authentication",
+          name: t("Authentication"),
+          description: t("Current authentication method"),
+          value: this._buildAuthenticationDisplay(),
+          expandedContent: this._buildAuthenticationPanelExtraContent(),
+        }),
+        SectionItem({
+          id: "session",
+          name: t("Session Secret"),
+          description: t("Key to sign sessions with"),
+          value: this._buildSessionSecretDisplay(),
+          expandedContent: this._buildSessionSecretNotice(),
+        }),
+        SectionItem({
+          id: "default-permissions",
+          name: t("Default permissions"),
+          description: t("Who can create sites, log in, and use the playground"),
+          value: buildPermissionsStatusDisplay(this._permissionsModel),
+          expandedContent: buildPermissionsCard(this._permissionsModel),
+        }),
+        SectionItem({
+          id: "outgoing-requests",
+          name: t("Outgoing requests"),
+          description: t("How user actions can reach the outside world"),
+          value: this._buildOutgoingRequestsDisplay(),
+          expandedContent: this._buildOutgoingRequestsContent(),
+        }),
+      ]),
+      this._buildBackupsSection(),
+      this._buildAuditLogsSection(),
+      SectionCard(t("Self Checks"), [
+        this._buildProbeItems({
+          showRedundant: false,
+          showNovel: true,
+        }),
+        SectionItem({
+          id: "probe-other",
+          name: t("more..."),
+          description: "",
+          value: "",
+          expandedContent: this._buildProbeItems({
+            showRedundant: true,
+            showNovel: false,
+          }),
+        }),
+      ]),
+    ];
+  }
+
+  private _buildEditionCard() {
+    return SectionCard(
+      dom("span", t("Edition"),
+        // SectionItem owns the per-item hash-scroll; this card isn't one, so re-run it for #edition.
+        dom.attr("id", ADMIN_PANEL_EDITION_ANCHOR),
+        () => {
+          if (window.location.hash === "#" + ADMIN_PANEL_EDITION_ANCHOR) {
+            setTimeout(() => focusAdminItem(ADMIN_PANEL_EDITION_ANCHOR), 0);
+          }
+        },
+      ),
+      [this._editionSection.buildDom()],
+    );
+  }
+
+  private _buildSandboxingDisplay() {
+    return dom.domComputed(
+      (use) => {
+        const req = this._checks.requestCheckById(use, "sandboxing");
+        const result = req ? use(req.result) : undefined;
+        const success = result?.status === "success";
+        const details = result?.details as SandboxingBootProbeDetails | undefined;
+        if (!details) {
+          // Sandbox details get filled out relatively slowly if
+          // this is first time on admin panel. So show "checking"
+          // if we don't have a reported status yet.
+          return cssValueLabel(result?.status ? t("unknown") : t("checking"));
+        }
+        const flavor = details.flavor;
+        const configured = details.configured;
+        return cssValueLabel(
+          configured ?
+            (success ? cssHappyText(t("OK") + `: ${flavor}`) :
+              cssErrorText(t("Error") + `: ${flavor}`)) :
+            cssErrorText(t("unconfigured")));
+      },
+    );
+  }
+
+  private _buildAdminUsersComputed(
+    use: UseCBOwner,
+    renderSuccess: (users: InstallAdminInfo[]) => Element,
+  ) {
+    const req = this._checks.requestCheckById(use, "admins");
+    const result = req ? use(req.result) : undefined;
+    const success = result?.status === "success";
+
+    if (!result) {
+      return t("checking");
+    }
+
+    if (!success) {
+      return cssErrorText(t("Error"));
+    }
+
+    const users: InstallAdminInfo[] = result?.details?.users || [];
+    return renderSuccess(users);
+  }
+
+  private _buildServiceStatusDisplay() {
+    return dom.domComputed(
+      (use) => {
+        const req = this._checks.requestCheckById(use, "service-status");
+        const result = req ? use(req.result) : undefined;
+
+        // Until the probe lands, show a neutral placeholder rather than the
+        // alarming default. Otherwise a real admin (and our tests) see
+        // "out of service" briefly on every page load.
+        if (!result) { return cssValueLabel(t("checking")); }
+        if (result.details?.inService) {
+          return cssValueLabel(cssHappyText(t("in service")));
+        }
+        return cssValueLabel(cssDangerText(t("out of service")));
+      },
+    );
+  }
+
+  private _buildServiceStatusContent() {
+    return dom.create(ServiceStatus, {
+      adminChecks: this._checks,
+      installAPI: this._installAPI,
+    });
+  }
+
+  private _buildAdminUsersDisplay() {
+    return cssValueLabel(
+      dom.domComputed(
+        use => this._buildAdminUsersComputed(use, (users) => {
+          const actualUsers = users.filter(detail => detail.user !== null);
+          if (actualUsers.length > 0) {
+            return cssHappyText(t("{{count}} admin accounts", { count: actualUsers.length }));
+          }
+          return cssErrorText(t("no admin accounts"));
+        }),
+      ),
+      testId("admin-panel-admin-accounts-display"),
+    );
+  }
+
+  private _buildAdminUsersDetail() {
+    return dom.domComputed(
+      use => this._buildAdminUsersComputed(use, (users) => {
+        return cssAdminAccountList(
+          users.map(({ user, reason }) => {
+            const userDisplay = user ? cssUserInfo(
+              createUserImage(user, "medium"),
+              cssUserName(dom("span", user.name, testId("admin-panel-admin-account-name")),
+                cssEmail(user.email, testId("admin-panel-admin-account-email")),
+              ),
+            ) : cssErrorText(t("Admin account not found"));
+            return cssAdminAccountListItem([
+              cssAdminAccountItemPart(userDisplay),
+              cssAdminAccountItemPart(cssAdminAccountReason(markdown(reason, { inline: true }))),
+            ], testId(`admin-panel-admin-accounts-list-item`));
+          }),
+          testId(`admin-panel-admin-accounts-list`),
+        );
+      }),
+    );
+  }
+
+  private _buildBootKeyDisplay() {
+    return dom.domComputed(
+      (use) => {
+        const req = this._checks.requestCheckById(use, "boot-key");
+        const result = req ? use(req.result) : undefined;
+
+        if (!result) { return cssValueLabel(t("checking")); }
+        if (result.details?.disabled) {
+          return cssValueLabel(cssHappyText(t("disabled")));
+        }
+        return cssValueLabel(cssDangerText(t("enabled")));
+      },
+    );
+  }
+
+  private _buildBootKeyContent() {
+    return dom.create(BootKeyStatus, {
+      adminChecks: this._checks,
+      installAPI: this._installAPI,
+    });
+  }
+
+  private _buildAuthenticationDisplay() {
+    return dom.domComputed(
+      (use) => {
+        const req = use(this._authCheck);
+        const result = req ? use(req.result) : undefined;
+        if (!result) {
+          return cssValueLabel(
+            cssErrorText(t("unavailable")),
+            testId("admin-panel-value-label-error"),
+          );
+        }
+
+        const { status, details, verdict } = result;
+        const success = status === "success";
+
+        const provider = details?.provider ?? details?.label;
+
+        if (!success && !provider) {
+          return cssValueLabel(
+            cssErrorText(t("auth error")),
+            verdict ? { title: verdict } : undefined,
+            testId("admin-panel-value-label-error"),
+          );
+        }
+
+        if (provider === MINIMAL_PROVIDER_KEY) {
+          return cssValueLabel(
+            cssDangerText(t("no authentication")),
+            verdict ? { title: verdict } : undefined,
+            testId("admin-panel-value-label-danger"),
+          );
+        }
+
+        if (provider === BOOT_KEY_PROVIDER_KEY) {
+          return cssValueLabel(
+            cssDangerText(t("boot key")),
+            verdict ? { title: verdict } : undefined,
+            testId("admin-panel-value-label-danger"),
+          );
+        }
+
+        if (!success) {
+          return cssValueLabel(
+            cssErrorText(t("auth error")),
+            verdict ? { title: t("error in {{provider}}: {{verdict}}", { provider, verdict }) } : undefined,
+            testId("admin-panel-value-label-error"),
+          );
+        }
+
+        return cssValueLabel(
+          cssHappyText(provider),
+          testId("admin-panel-value-label-success"),
+        );
+      },
+    );
+  }
+
+  private _buildAuthenticationPanelExtraContent() {
+    return this._authSection?.buildDom();
+  }
+
+  private _buildSessionSecretDisplay() {
+    return dom.domComputed(
+      (use) => {
+        const req = this._checks.requestCheckById(use, "session-secret");
+        const result = req ? use(req.result) : undefined;
+
+        if (result?.status === "warning") {
+          return cssValueLabel(cssDangerText(t("default")));
+        }
+
+        return cssValueLabel(cssHappyText(t("configured")));
+      },
+    );
+  }
+
+  private _buildSessionSecretNotice() {
+    return t("Grist signs user session cookies with a secret key. Please set this key via the environment variable \
+GRIST_SESSION_SECRET. Grist falls back to a hard-coded default when it is not set. We may remove this notice \
+in the future as session IDs generated since v1.1.16 are inherently cryptographically secure.");
+  }
+
+  private _buildOutgoingRequestsDisplay() {
+    return dom.domComputed((use) => {
+      const req = this._checks.requestCheckById(use, "outgoing-requests");
+      return buildOutgoingRequestsSummary(req ? use(req.result) : undefined);
+    });
+  }
+
+  private _buildOutgoingRequestsContent() {
+    return dom.domComputed((use) => {
+      const req = this._checks.requestCheckById(use, "outgoing-requests");
+      return buildOutgoingRequestsPanel(req ? use(req.result) : undefined);
+    });
+  }
+
+  private _buildUpdates(owner: MultiHolder) {
+    // We can be in those states:
+    enum State {
+      // Never checked before (no last version or last check time).
+      // Shows "No information available" [Check now]
+      NEVER,
+      // Did check previously, but it was a while ago, user should press the button to check.
+      // Shows "Last checked X days ago" [Check now]
+      STALE,
+      // In the middle of checking for updates.
+      CHECKING,
+      // Transient state, shown after Check now is clicked.
+      // Grist is up to date (state only shown after a successful check), or even upfront.
+      // Won't be shown after page is reloaded.
+      // Shows "Checking for updates..."
+      CURRENT,
+      // A newer version is available. Can be shown after reload if last
+      // version that was checked is newer than the current version.
+      // Shows "Newer version available" [version]
+      AVAILABLE,
+      // Error occurred during this check. If the error occurred during last check
+      // it is not stored.
+      // Shows "Error checking for updates" [Check now]
+      ERROR,
+    }
+
+    const config = getGristConfig();
+    const latestVersionAvailable = Observable.create(owner, config.latestVersionAvailable);
+    const checkForLatestVersion = Observable.create(owner, true);
+    const allowAutomaticVersionChecking = Observable.create(owner, config.automaticVersionCheckingAllowed);
+    this._installAPI.getInstallPrefs()
+      .then((prefs) => {
+        if (this.isDisposed() || checkForLatestVersion.isDisposed()) { return; }
+        checkForLatestVersion.set(prefs.checkForLatestVersion ?? true);
+      })
+      .catch(reportError);
+
+    // Observable state of the updates check.
+    const state: Observable<State> = Observable.create(owner, State.NEVER);
+
+    // The background task that checks for updates, can be disposed (cancelled) when needed.
+    let backgroundTask: IDisposable | null = null;
+
+    // By default we link to the Docker Hub releases page, but the
+    // endpoint might say something different.
+    const releaseURL = "https://hub.docker.com/r/gristlabs/grist";
+
+    // All the events that might occur
+    const actions = {
+      checkForUpdates: async () => {
+        state.set(State.CHECKING);
+        latestVersionAvailable.set(undefined);
+        // We can be disabled, while the check is in progress.
+        const controller = new AbortController();
+        backgroundTask = {
+          dispose() {
+            if (controller.signal.aborted) { return; }
+            backgroundTask = null;
+            controller.abort();
+          },
+        };
+        owner.autoDispose(backgroundTask);
+        try {
+          const result = await this._installAPI.checkUpdates();
+          if (controller.signal.aborted) { return; }
+          actions.gotLatestVersion(result);
+        } catch (err) {
+          if (controller.signal.aborted) { return; }
+          state.set(State.ERROR);
+          reportError(err);
+        }
+      },
+      disableAutoCheck: () => {
+        backgroundTask?.dispose();
+        backgroundTask = null;
+        this._installAPI.updateInstallPrefs({ checkForLatestVersion: false }).catch(reportError);
+        checkForLatestVersion.set(false);
+      },
+      enableAutoCheck: () => {
+        if (state.get() !== State.CHECKING) {
+          actions.checkForUpdates().catch(reportError);
+          this._installAPI.updateInstallPrefs({ checkForLatestVersion: true }).catch(reportError);
+          checkForLatestVersion.set(true);
+        }
+      },
+      gotLatestVersion: (data: LatestVersionAvailable) => {
+        latestVersionAvailable.set(data);
+        if (data.isNewer) {
+          state.set(State.AVAILABLE);
+        } else {
+          state.set(State.CURRENT);
+        }
+      },
+    };
+
+    const description = Computed.create(owner, (use) => {
+      switch (use(state)) {
+        case State.NEVER: return t("No information available");
+        case State.CHECKING: return "⌛ " + t("Checking for updates...");
+        case State.CURRENT: return "✅ " + t("Grist is up to date");
+        case State.AVAILABLE: return t("Newer version available");
+        case State.ERROR: return "❌ " + t("Error checking for updates");
+        case State.STALE: {
+          const lastCheck = latestVersionAvailable.get()?.dateChecked;
+          return lastCheck ?
+            t("Last checked {{time}}", { time: getTimeFromNow(lastCheck) }) :
+            t("No record of last version check");
+        }
+      }
+    });
+
+    // Now trigger the initial state
+    const lastCheck = latestVersionAvailable.get()?.dateChecked;
+    if (lastCheck) {
+      if (Date.now() - lastCheck > STALE_VERSION_CHECK_TIME_IN_MS) {
+        // It's been too long since we last checked
+        state.set(State.STALE);
+      } else if (latestVersionAvailable.get()?.isNewer === true) {
+        state.set(State.AVAILABLE);
+      } else if (latestVersionAvailable.get()?.isNewer === false) {
+        state.set(State.CURRENT);
+      }
+    } else {
+      state.set(State.NEVER);
+    }
+
+    // Toggle component operates on a boolean observable, without a way to set the value. So
+    // create a controller for it to intercept the write and call the appropriate action.
+    const enabledController = Computed.create(owner, use => use(checkForLatestVersion));
+    enabledController.onWrite((val) => {
+      if (val) {
+        actions.enableAutoCheck();
+      } else {
+        actions.disableAutoCheck();
+      }
+    });
+
+    const upperCheckNowVisible = Computed.create(owner, (use) => {
+      switch (use(state)) {
+        case State.CHECKING:
+        case State.CURRENT:
+        case State.AVAILABLE:
+          return false;
+        default:
+          return true;
+      }
+    });
+
+    return SectionItem({
+      id: "updates",
+      name: t("Updates"),
+      description: dom("span", testId("admin-panel-updates-message"), dom.text(description)),
+      value: cssValueButton(
+        dom.domComputed((use) => {
+          if (use(state) === State.CHECKING) {
+            return null;
+          }
+
+          if (use(upperCheckNowVisible)) {
+            return basicButton(
+              t("Check now"),
+              dom.on("click", actions.checkForUpdates),
+              testId("admin-panel-updates-upper-check-now"),
+            );
+          }
+
+          if (use(latestVersionAvailable)) {
+            return cssValueLabel(
+              `Version ${use(latestVersionAvailable)?.version}`,
+              testId("admin-panel-updates-version"),
+            );
+          }
+
+          throw new Error("Invalid state");
+        }),
+      ),
+      expandedContent: dom("div",
+        cssExpandedContent(
+          dom.domComputed(use => dom("div", t("Grist releases are at "),
+            makeLinks(use(latestVersionAvailable)?.releaseUrl || releaseURL),
+          )),
+        ),
+        dom.maybe(latestVersionAvailable, latest => cssExpandedContent(
+          dom("div",
+            dom("span", t("Last checked {{time}}", {
+              time: getTimeFromNow(latest.dateChecked),
+            })),
+            dom("span", " "),
+            // Format date in local format.
+            cssGrayed(`(${new Date(latest.dateChecked).toLocaleString()})`),
+          ),
+          // `Check now` button, only shown when auto checks are enabled and we are not in the
+          // middle of checking. Otherwise the button is shown in the summary row, and there is
+          // no need to duplicate it.
+          dom.maybe(use => !use(upperCheckNowVisible), () => [
+            cssCheckNowButton(
+              t("Check now"),
+              testId("admin-panel-updates-lower-check-now"),
+              dom.on("click", actions.checkForUpdates),
+              dom.prop("disabled", use => use(state) === State.CHECKING),
+            ),
+          ]),
+        )),
+        dom.domComputed(allowAutomaticVersionChecking, allowAutomaticChecks =>
+          allowAutomaticChecks ? cssExpandedContent(
+            dom("label", t("Auto-check weekly"), { for: "admin-panel-updates-auto-check-switch" }),
+            dom("div", toggleSwitch(enabledController, {
+              args: [testId("admin-panel-updates-auto-check")],
+              inputArgs: [{ id: "admin-panel-updates-auto-check-switch" }],
+            })),
+          ) :
+            cssExpandedContent(
+              dom("span", t('Automatic checks are disabled. \
+Set the environment variable GRIST_ALLOW_AUTOMATIC_VERSION_CHECKING to "true" to enable them.'),
+              testId("admin-panel-updates-auto-check-disabled")),
+            ),
+        )),
+    });
+  }
+
+  /**
+   * Show the results of various checks. Of the checks, some are considered
+   * "redundant" (already covered elsewhere in the Admin Panel) and the
+   * remainder are "novel".
+   */
+  private _buildProbeItems(options: {
+    showRedundant: boolean,
+    showNovel: boolean,
+  }) {
+    return dom.domComputed(
+      use => [
+        ...use(this._checks.probes).map((probe) => {
+          const isRedundant = [
+            "boot-key",
+            "sandboxing",
+            "authentication",
+            "session-secret",
+            "service-status",
+            "backups",
+            "persist-data",
+            "outgoing-requests",
+          ].includes(probe.id);
+          const show = isRedundant ? options.showRedundant : options.showNovel;
+          if (!show) { return null; }
+          const req = this._checks.requestCheck(probe);
+          return this._buildProbeItem(req.probe, use(req.result), req.details);
+        }),
+      ],
+    );
+  }
+
+  /**
+   * Show the result of an individual check.
+   */
+  private _buildProbeItem(info: BootProbeInfo,
+    result: BootProbeResult,
+    details: ProbeDetails | undefined) {
+    const status = this._encodeSuccess(result);
+    return SectionItem({
+      id: `probe-${info.id}`,
+      name: info.id,
+      description: info.name,
+      value: cssStatus(status),
+      expandedContent: [
+        cssCheckHeader(
+          t("Results"),
+          { style: "margin-top: 0px; padding-top: 0px;" },
+        ),
+        result.verdict ? cssVerdict(result.verdict) : null,
+        (result.status === "none") ? null :
+          dom("p",
+            (result.status === "success") ? t("Check succeeded.") : t("Check failed.")),
+        (result.status !== "none") ? null :
+          dom("p", t("No fault detected.")),
+        (details?.info === undefined) ? null : [
+          cssCheckHeader(t("Notes")),
+          details.info,
+        ],
+        (result.details === undefined) ? null : [
+          cssCheckHeader(t("Details")),
+          ...Object.entries(result.details).map(([key, val]) => {
+            return dom(
+              "div",
+              cssLabel(key),
+              dom("input", dom.prop(
+                "value",
+                typeof val === "string" ? val : JSON.stringify(val))));
+          }),
+        ],
+      ],
+    });
+  }
+
+  /**
+   * Give an icon summarizing success or failure. Factor in the
+   * severity of the result for failures. This is crude, the
+   * visualization of the results can be elaborated in future.
+   */
+  private _encodeSuccess(result: BootProbeResult) {
+    switch (result.status) {
+      case "success":
+        return "✅";
+      case "fault":
+        return "❌";
+      case "warning":
+        return "❗";
+      case "hmm":
+        return "?";
+      case "none":
+        return "―";
+      default:
+        // should not arrive here
+        return "??";
+    }
+  }
+
+  private _buildBackupsSection() {
+    const backups = BackupsSection.create(this, { checks: this._checks, inAdminPanel: true });
+    return SectionCard(t("Storage"), [
+      SectionItem({
+        id: "backups",
+        name: t("Backups"),
+        description: t("Back up documents externally"),
+        value: backups.buildStatusDisplay(),
+        expandedContent: backups.buildDom(),
+      }),
+    ]);
+  }
+
+  private _buildAuditLogsSection() {
+    const { deploymentType } = getGristConfig();
+    switch (deploymentType) {
+      // Note: SaaS builds are only included to streamline UI testing.
+      case "core":
+      case "enterprise":
+      case "saas": {
+        return SectionCard(
+          [t("Audit Logs"), cssSectionTag(t("full Edition"))],
+          [this._buildLogStreamingSection(deploymentType)],
+        );
+      }
+      default: {
+        return null;
+      }
+    }
+  }
+
+  private _buildLogStreamingSection(
+    deploymentType: "core" | "enterprise" | "saas",
+  ) {
+    if (deploymentType === "core") {
+      return SectionItem({
+        id: "log-streaming",
+        name: t("Log Streaming"),
+        expandedContent: t(
+          "You can set up streaming of audit events from Grist to an \
+external security information and event management (SIEM) \
+system if you enable Grist Enterprise. {{contactUsLink}} to \
+learn more.",
+          {
+            contactUsLink: cssLink(
+              { href: commonUrls.contact, target: "_blank" },
+              t("Contact us"),
+            ),
+          },
+        ),
+      });
+    } else {
+      const model = new AuditLogsModelImpl({
+        configsAPI: new InstallConfigsAPI(),
+      });
+      model.fetchStreamingDestinations().catch(reportError);
+
+      return SectionItem({
+        id: "log-streaming",
+        name: t("Log Streaming"),
+        value: this._buildLogStreamingStatus(model),
+        expandedContent: dom.create(AuditLogStreamingConfig, model),
+      });
+    }
+  }
+
+  private _buildLogStreamingStatus(model: AuditLogsModel) {
+    return dom.domComputed((use) => {
+      const destinations = use(model.streamingDestinations);
+      if (!destinations) {
+        return null;
+      } else if (destinations.length === 0) {
+        return cssValueLabel(cssDangerText(t("Off")));
+      } else {
+        const [first, ...rest] = destinations;
+        let status: string;
+        if (rest.length > 0) {
+          status = t(
+            "{{firstDestinationName}} + {{- remainingDestinationsCount}} more",
+            {
+              firstDestinationName: getDestinationDisplayName(first.name),
+              remainingDestinationsCount: rest.length,
+            },
+          );
+        } else {
+          status = getDestinationDisplayName(first.name);
+        }
+        return cssValueLabel(cssHappyText(status));
+      }
+    });
+  }
+}
+
+// Ugh I'm not a front end person. h5 small-caps, sure why not.
+// Hopefully someone with taste will edit someday!
+const cssCheckHeader = styled("h5", `
+  margin-bottom: 5px;
+  font-variant: small-caps;
+`);
+
+const cssStatus = styled("div", `
+  display: inline-block;
+  text-align: center;
+  width: 40px;
+  padding: 5px;
+`);
+
+// Brief highlight applied when the user clicks "Apply changes" in the left
+// panel to locate the banner.
+const cssRestartBannerFlash = keyframes(`
+  0%, 100% { box-shadow: none; }
+  30%      { box-shadow: 0 0 0 3px ${theme.controlFg}; }
+`);
+
+// Reveal uses a grid-template-rows transition rather than an animation so
+// it doesn't collide with the `-flash` keyframe animation (adding a shared
+// `animation:` declaration in `-flash` would replace the reveal mid-flight).
+const cssRestartBannerShell = styled("div", `
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.3s ease-out;
+  & > * {
+    overflow: hidden;
+    min-height: 0;
+  }
+  &.-open {
+    grid-template-rows: 1fr;
+  }
+  &.-flash {
+    animation: ${cssRestartBannerFlash} 1s ease-out;
+    border-radius: 4px;
+  }
+`);
+
+const cssRestartBanner = styled(cssSection, ``);
+
+const cssDraftChangesList = styled("ul", `
+  margin: 0 0 12px 0;
+  padding-left: 20px;
+  color: ${theme.text};
+  & > li {
+    margin-bottom: 4px;
+  }
+`);
+
+const cssDraftChangeLabel = styled("span", `
+  font-weight: 600;
+`);
+
+const cssRestartButtonRow = styled("div", `
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+`);
+
+const cssExpandedContent = styled("div", `
+  display: flex;
+  justify-content: space-between;
+  margin-right: 8px;
+  margin-bottom: 1rem;
+  align-items: center;
+`);
+
+const cssValueButton = styled("div", `
+  height: 30px;
+`);
+
+const cssCheckNowButton = styled(basicButton, `
+  &-hidden {
+    visibility: hidden;
+  }
+`);
+
+const cssGrayed = styled("span", `
+  color: ${theme.lightText};
+`);
+
+const cssLabel = styled("div", `
+  display: inline-block;
+  min-width: 100px;
+  text-align: right;
+  padding-right: 5px;
+`);
+
+const cssAdminAccountList = styled("ul", `
+  list-style: none;
+  padding: 0;
+  max-width: 700px;
+  margin: 0 auto;
+`);
+
+const cssAdminAccountListItem = styled("li", `
+  padding: 1rem 0rem;
+  margin: 0rem 1.2rem;
+  display: flex;
+  align-items: center;
+  &:not(:first-child) {
+    border-top: 1px solid ${theme.widgetBorder};
+  }
+`);
+
+const cssAdminAccountReason = styled("span", `
+  font-size: 0.9rem;
+  font-weight: 500;
+  display: inherit;
+`);
+
+const cssAdminAccountItemPart = styled("span", `
+  width: 50%;
+  &>:not(div) {
+    padding: 12px 24px 12px 16px;
+  }
+`);
+
+const cssVerdict = styled("pre", `
+  white-space: normal;
+`);
+
+async function reloadSafe() {
+  // Reload the page.
+  const currentUrl = new URL(window.location.href);
+  // Clear search params to avoid re-triggering the configuration page.
+  currentUrl.search = "";
+  await delay(2000); // Allow UI to update before doing the work
+  let counter = 10;
+  while (counter-- > 0) {
+    try {
+      const res = await fetch(window.location.href, { credentials: "include" });
+      if (res.status === 200) {
+        break;
+      }
+    } catch {
+      // Server is mid-restart; keep polling.
+    }
+    await delay(1000);
+  }
+
+  if (currentUrl.href === window.location.href) {
+    window.location.reload();
+  } else {
+    window.location.href = currentUrl.href;
+  }
+}

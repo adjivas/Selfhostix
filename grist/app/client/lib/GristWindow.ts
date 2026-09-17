@@ -1,0 +1,43 @@
+/**
+ * Some client-side code sets global properties (on the global Window object). This isn't a
+ * great practice, and should normally be avoided. But on occasion it's used to simplify testing,
+ * make debugging easier, and initialization (e.g. gristConfig).
+ *
+ * This file collects most of the properties we use, for typings and visibility.
+ */
+import {
+  AirtableImportOptions,
+} from "app/client/lib/airtable/AirtableImporter";
+
+import type { TopAppModel } from "app/client/models/AppModel";
+import type { DocPageModel } from "app/client/models/DocPageModel";
+import type { Experiments } from "app/client/ui/Experiments";
+import type { GristLoadConfig } from "app/common/gristUrls";
+import type { TestState } from "app/common/TestState";
+
+declare global {
+  export interface Window {
+    $?: JQueryStatic;    // Some old code still uses JQuery events.
+    gristConfig?: GristLoadConfig;
+    gristNotify?: (message: string) => void;
+    getAppErrors?: () => string[];
+    gristDocPageModel?: DocPageModel;
+    gristApp?: {
+      topAppModel?: TopAppModel;
+      testNumPendingApiRequests?: () => number;
+      testNumPendingChecks?: () => number;
+      testNumPendingPastes?: () => number;
+      testNumPendingMenuActions?: () => number;
+      testNumPendingViewLoads?: () => number;
+    };
+    cmd?: { [name: string]: () => void };
+    isRunningUnderElectron?: boolean;
+    resetDismissedPopups?: (seen?: boolean) => void;
+    resetOnboarding?: () => void;
+    gristExperiments?: Experiments;
+    gristAirtableImport?: (
+      apiKey: string, base: string, options: AirtableImportOptions,
+    ) => Promise<any>;
+    testGrist?: Partial<TestState>;
+  }
+}

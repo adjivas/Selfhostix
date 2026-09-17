@@ -1,0 +1,16 @@
+# Postgresql db container configuration
+POSTGRES_DB=impress
+POSTGRES_USER=dinum
+POSTGRES_PASSWORD=pass
+
+# App database configuration
+DB_HOST=postgresql
+DB_NAME=impress
+DB_USER=dinum
+DB_PASSWORD=pass
+DB_PORT=5432
+
+# If you want to create a user without superuser permissions, you can change it.
+# The database must be deleted in order to be recreated.
+# DB_USER=docs
+# DB_PASSWORD=docs

@@ -1,0 +1,110 @@
+import {
+  FormFieldRulesConfig,
+  FormOptionsAlignmentConfig,
+  FormOptionsLimitConfig,
+  FormOptionsSortConfig,
+} from "app/client/components/Forms/FormConfig";
+import { DataRowModel } from "app/client/models/DataRowModel";
+import { testId } from "app/client/ui2018/cssVars";
+import {
+  ChoiceOptionsByName,
+  ChoiceTextBox,
+} from "app/client/widgets/ChoiceTextBox";
+import { choiceToken } from "app/client/widgets/ChoiceToken";
+import { CellValue } from "app/common/DocActions";
+import { decodeObject } from "app/plugin/objtypes";
+
+import { dom, styled } from "grainjs";
+
+/**
+ * ChoiceListCell - A cell that renders a list of choice tokens.
+ */
+export class ChoiceListCell extends ChoiceTextBox {
+  public buildDom(row: DataRowModel) {
+    const value = row.cells[this.field.colId.peek()];
+
+    return cssChoiceList(
+      dom.cls("field_clip"),
+      cssChoiceList.cls("-wrap", this.wrapping),
+      dom.style("justify-content", use => use(this.alignment) === "right" ? "flex-end" : use(this.alignment)),
+      dom.domComputed((use) => {
+        return use(row._isAddRow) ? null :
+          [
+            use(value), use(this.getChoiceValuesSet()),
+            use(this.getChoiceOptions()),
+          ] as [CellValue, Set<string>, ChoiceOptionsByName];
+      }, (input) => {
+        if (!input) { return null; }
+        const [rawValue, choiceSet, choiceOptionsByName] = input;
+        const val = decodeObject(rawValue);
+        if (!val) { return null; }
+        // Handle any unexpected values we might get (non-array, or array with non-strings).
+        const tokens: unknown[] = Array.isArray(val) ? val : [val];
+        return tokens.map((token) => {
+          const isBlank = String(token).trim() === "";
+          return choiceToken(
+            isBlank ? "[Blank]" : String(token),
+            {
+              ...(choiceOptionsByName.get(String(token)) || {}),
+              invalid: !choiceSet.has(String(token)),
+              blank: String(token).trim() === "",
+            },
+            dom.cls(cssToken.className),
+            testId("choice-list-cell-token"),
+          );
+        });
+      }),
+    );
+  }
+
+  public buildFormConfigDom() {
+    return [
+      this.buildChoicesConfigDom(),
+      dom.create(FormOptionsAlignmentConfig, this.field),
+      dom.create(FormOptionsSortConfig, this.field),
+      dom.create(FormOptionsLimitConfig, this.field),
+      dom.create(FormFieldRulesConfig, this.field),
+    ];
+  }
+}
+
+// When "max row height" is set, we try hard to keep lines to the same height as lines of normal
+// text, since the overflow ellipsis is based on lines of text rather than pixel height, and a
+// discrepancy will cause it to show below the visible area or in the middle of text.
+// We also treat it as if line-wrapping is on, as there seems little advantage to keep the cell to
+// a single line when an explicit max number of lines is set.
+export const cssChoiceList = styled("div", `
+  display: flex;
+  align-content: start;
+  align-items: start;
+  padding: 0 3px;
+
+  position: relative;
+  min-height: 22px;
+
+  &-wrap {
+    flex-wrap: wrap;
+  }
+
+  .row_height_set & {
+    flex-wrap: wrap;
+    word-break: break-word;
+    white-space: pre-wrap;
+    padding: 2px 3px 0 3px;
+    line-height: 0px;
+  }
+`);
+
+export const cssToken = styled("div", `
+  flex: 0 1 auto;
+  min-width: 0px;
+  margin: 2px;
+  line-height: 16px;
+
+  .row_height_set & {
+    margin: 1px 2px;
+    padding-top: 0px;
+    padding-bottom: 0px;
+    vertical-align: text-bottom;
+  }
+`);

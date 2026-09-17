@@ -1,0 +1,23 @@
+{
+    "oidc": {
+        "emailNotVerifiedError": "Merci de vérifier la validité de votre adresse mail auprès de votre fournisseur d'identification, avant de vous reconnecter."
+    },
+    "sendAppPage": {
+        "Loading...": "Chargement en cours...",
+        "og-description": "Un tableur moderne et open source qui va au-delà de la feuille de calcul",
+        "og-title": "Grist, le tableur évolué"
+    },
+    "access": {
+        "docNoAccess": "Vous n'avez pas accès à ce document.",
+        "docDisabled": "Ce document est désactivé."
+    },
+    "admin": {
+        "emptyOrg": "Aucun propriétaire trouvé dans l'organisation admin définie par `GRIST_INSTALL_ADMIN_ORG={{org}}`",
+        "orgUser": "L'utilisateur est un propriétaire de l'organisation admin définie par `GRIST_INSTALL_ADMIN_ORG={{org}}`",
+        "accountByEmail": "Compte d'administration défini par `GRIST_DEFAULT_EMAIL={{defaultEmail}}`",
+        "noAdminEmail": "Il manque un compte d'administration car `GRIST_ADMIN_EMAIL` et `GRIST_DEFAULT_EMAIL` ne sont pas définies"
+    },
+    "DocApi": {
+        "UntitledDocument": "Document sans titre"
+    }
+}

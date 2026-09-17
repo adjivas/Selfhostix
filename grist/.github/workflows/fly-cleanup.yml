@@ -1,0 +1,23 @@
+name: fly.io Cleanup
+on:
+  schedule:
+    # Once a day, clean up jobs marked as expired
+    - cron: '50 12 * * *'
+
+  # Allows running this workflow manually from the Actions tab
+  workflow_dispatch:
+
+env:
+  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+
+jobs:
+  clean:
+    name: Clean stale deployed apps
+    runs-on: ubuntu-22.04
+    if: github.repository_owner == 'gristlabs'
+    steps:
+      - uses: actions/checkout@v3
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+        with:
+          version: 0.2.72
+      - run: node buildtools/fly-deploy.js clean

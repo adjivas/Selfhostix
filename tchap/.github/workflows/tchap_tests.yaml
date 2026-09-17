@@ -1,0 +1,38 @@
+#Run the tests
+#tchap modification : use "./scripts/tchap/install-yarn-linked-repositories.sh" instead of "./scripts/layered.sh"
+name: Tests Tchap # avoid having same name as Element workflows, it causes problems
+on:
+    pull_request: {}
+    push:
+        branches: [develop, master]
+    merge_group:
+        types: [checks_requested]
+    repository_dispatch:
+        types: [element-web-notify]
+env:
+    # These must be set for fetchdep.sh to get the right branch
+    REPOSITORY: ${{ github.repository }}
+    PR_NUMBER: ${{ github.event.pull_request.number }}
+jobs:
+    jest:
+        name: Jest
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+            - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5
+            - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+              with:
+                  cache: "pnpm"
+                  node-version-file: package.json
+
+            - name: Install Dependencies
+              run: "pnpm install --frozen-lockfile"
+
+            - name: Get number of CPU cores
+              id: cpu-cores
+              uses: SimenB/github-actions-cpu-cores@97ba232459a8e02ff6121db9362b09661c875ab8 # v2
+
+            - name: Run tests tchap unit tests
+              working-directory: apps/web
+              run: "pnpm test:tchap"

@@ -1,0 +1,320 @@
+name: drive
+
+services:
+  postgresql:
+    user: ${DOCKER_USER:-1000}
+    image: postgres:16
+    ports:
+      - "6434:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]
+      interval: 1s
+      timeout: 2s
+      retries: 300
+    env_file:
+      - env.d/development/postgresql
+      - env.d/development/postgresql.${ENV_OVERRIDE:-local}
+    volumes:
+      - ./data/postgresql.${ENV_OVERRIDE:-local}:/var/lib/postgresql/data
+
+  redis:
+    image: redis:5
+    ports:
+      - "6379:6379"
+
+  mailcatcher:
+    image: sj26/mailcatcher:latest
+    ports:
+      - "1081:1080"
+
+  minio:
+    user: ${DOCKER_USER:-1000}
+    image: quay.io/minio/minio
+    environment:
+      - MINIO_ROOT_USER=drive
+      - MINIO_ROOT_PASSWORD=password
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 1s
+      timeout: 20s
+      retries: 300
+    entrypoint: ""
+    command: minio server --console-address :9001 /data
+    volumes:
+      - ./data/media:/data
+
+  createbuckets:
+    image: quay.io/minio/mc
+    depends_on:
+      minio:
+        condition: service_healthy
+        restart: true
+    entrypoint: >
+      sh -c "
+      /usr/bin/mc alias set drive http://minio:9000 drive password && \
+      /usr/bin/mc mb drive/drive-media-storage && \
+      /usr/bin/mc version enable drive/drive-media-storage && \
+      exit 0;"
+
+  app-dev:
+    build:
+      context: .
+      target: backend-development
+      args:
+        DOCKER_USER: ${DOCKER_USER:-1000}
+    user: ${DOCKER_USER:-1000}
+    image: drive:backend-development
+    environment:
+      - PYLINTHOME=/app/.pylint.d
+      - DJANGO_CONFIGURATION=Development
+    env_file:
+      - env.d/development/common
+      - env.d/development/common.${ENV_OVERRIDE:-local}
+      - env.d/development/postgresql
+      - env.d/development/postgresql.${ENV_OVERRIDE:-local}
+    ports:
+      - "8071:8000"
+    volumes:
+      - ./src/backend:/app
+      - ./data/static:/data/static
+      - /app/.venv
+    networks:
+      - lasuite
+      - default
+    depends_on:
+      postgresql:
+        condition: service_healthy
+        restart: true
+      mailcatcher:
+        condition: service_started
+      redis:
+        condition: service_started
+      createbuckets:
+        condition: service_started
+      celery-dev:
+        condition: service_started
+      collabora:
+        condition: service_healthy
+      onlyoffice:
+        condition: service_healthy
+
+  ds-proxy:
+    image: demarchenumerique/ds-proxy:v2.0.0-alpha.4
+    command:
+      [
+        "proxy",
+        "--address",
+        "0.0.0.0:4444",
+        "--password-file",
+        "/etc/dsproxy/PASSWORD",
+        "--keyring-file",
+        "/etc/dsproxy/keyring.toml",
+        "--upstream-url",
+        "http://minio:9000",
+        "--local-encryption-directory",
+        "/var/tmp/local_encryption/",
+        "--s3-access-key",
+        "drive",
+        "--s3-secret-key",
+        "password",
+        "--s3-region",
+        "us-east-1",
+      ]
+    ports:
+      - "4444:4444"
+    environment:
+      - RUST_LOG=debug,ds_proxy::http::handlers::fetch=trace,ds_proxy::http::handlers::forward=trace
+      - RUST_BACKTRACE=full
+    volumes:
+      - ./docker/files/development/ds_proxy/:/etc/dsproxy/:ro
+
+  celery-dev:
+    user: ${DOCKER_USER:-1000}
+    image: drive:backend-development
+    networks:
+      - default
+      - lasuite
+    command: ["celery", "-A", "drive.celery_app", "worker", "-l", "DEBUG"]
+    environment:
+      - DJANGO_CONFIGURATION=Development
+    env_file:
+      - env.d/development/common
+      - env.d/development/common.local
+      - env.d/development/common.${ENV_OVERRIDE:-local}
+      - env.d/development/postgresql
+      - env.d/development/postgresql.local
+      - env.d/development/postgresql.${ENV_OVERRIDE:-local}
+    volumes:
+      - ./src/backend:/app
+      - ./data/static:/data/static
+      - /app/.venv
+
+  nginx:
+    image: nginx:1.25
+    ports:
+      - "8083:8083"
+    networks:
+      default: {}
+      lasuite:
+        aliases:
+          - nginx
+    volumes:
+      - ./docker/files/development/etc/nginx/conf.d:/etc/nginx/conf.d:ro
+    depends_on:
+      keycloak:
+        condition: service_healthy
+        restart: true
+      app-dev:
+        condition: service_started
+
+  # The static service is only used in the CI to serve the build
+  static:
+    image: nginx:1.25
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: curl -sf http://127.0.0.1:3000/ || exit 1
+      interval: 2s
+      timeout: 10s
+      retries: 30
+      start_period: 2s
+    volumes:
+      - ./src/frontend/apps/drive/out:/usr/share/nginx/html:ro
+      - ./src/frontend/apps/drive/conf/default.conf:/etc/nginx/conf.d/default.conf:ro
+
+  frontend-dev:
+    user: "${DOCKER_USER:-1000}"
+    build:
+      context: .
+      dockerfile: ./src/frontend/Dockerfile
+      target: drive-dev
+      args:
+        API_ORIGIN: "http://localhost:8071"
+    image: drive:frontend-development
+    volumes:
+      - ./src/frontend/:/home/frontend/
+      - ./src/frontend/node_modules:/home/frontend/node_modules
+      - ./src/frontend/apps/drive/node_modules:/home/frontend/apps/drive/node_modules
+    ports:
+      - "3000:3000"
+
+  crowdin:
+    image: crowdin/cli:3.16.0
+    volumes:
+      - ".:/app"
+    env_file:
+      - env.d/development/crowdin
+      - env.d/development/crowdin.local
+    user: "${DOCKER_USER:-1000}"
+    working_dir: /app
+
+  node:
+    image: node:22
+    user: "${DOCKER_USER:-1000}"
+    environment:
+      HOME: /tmp
+    volumes:
+      - ".:/app"
+
+  kc_postgresql:
+    image: postgres:14.3
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready"]
+      interval: 1s
+      timeout: 2s
+      retries: 300
+    ports:
+      - "6433:5432"
+    env_file:
+      - env.d/development/kc_postgresql
+      - env.d/development/kc_postgresql.local
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.3.2
+    volumes:
+      - ./docker/auth/realm.json:/opt/keycloak/data/import/realm.json
+    command:
+      - start-dev
+      - --features=preview
+      - --import-realm
+      - --proxy=edge
+      - --hostname=http://localhost:8083
+      - --hostname-strict=false
+      - --health-enabled=true
+      - --metrics-enabled=true
+    healthcheck:
+      test: ['CMD-SHELL', 'exec 3<>/dev/tcp/localhost/9000; echo -e "GET /health/live HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; grep "HTTP/1.1 200 OK" <&3']
+      start_period: 5s
+      interval: 1s
+      timeout: 2s
+      retries: 300
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL_HOST: kc_postgresql
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_PASSWORD: pass
+      KC_DB_USERNAME: drive
+      KC_DB_SCHEMA: public
+      PROXY_ADDRESS_FORWARDING: "true"
+    ports:
+      - "8080:8080"
+    depends_on:
+      kc_postgresql:
+        condition: service_healthy
+        restart: true
+    networks:
+      - lasuite
+      - default
+
+  collabora:
+    image: collabora/code:26.04.2.2.1
+    # The entrypoint runs coolwsd directly (no shell in the image), so
+    # options are passed as command arguments instead of extra_params.
+    command: ["--o:ssl.enable=false"]
+    healthcheck:
+      # The built-in probe targets https; pass the same override so it
+      # checks the plain-http endpoint we actually serve.
+      test: ["CMD", "/usr/bin/coolwsd", "--probe", "--o:ssl.enable=false"]
+      interval: 30s
+      retries: 5
+      start_period: 60s
+      timeout: 10s
+    ports:
+      - "9980:9980"
+    environment:
+      - username=drive
+      - password=password
+      - server_name=localhost:9980
+      - aliasgroup1=app-dev:8000
+
+  onlyoffice:
+    image: onlyoffice/documentserver-de
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/hosting/discovery"]
+      interval: 30s
+      retries: 5
+      start_period: 60s
+      timeout: 10s
+    environment:
+      TZ: "Europe/Berlin"
+      USE_UNAUTHORIZED_STORAGE: "true"
+      JWT_ENABLED: "true"
+      JWT_SECRET: "ThisIsNotASecretKeyDev"
+    ports:
+      - "9981:80"
+    volumes:
+      - ./docker/onlyoffice/local-development.json:/etc/onlyoffice/documentserver/local-production-linux.json
+      # Enable debug
+      - ./docker/onlyoffice/log4js/production.json:/etc/onlyoffice/documentserver/log4js/production.json
+
+networks:
+  default: {}
+  lasuite:
+    name: lasuite-network
+    driver: bridge
+    external: true

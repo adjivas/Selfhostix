@@ -1,0 +1,287 @@
+import { Item, ItemType } from "@/features/drivers/types";
+import {
+  useTreeContext,
+  MenuItem,
+  useModal,
+} from "@gouvfr-lasuite/ui-components";
+import {
+  Shared,
+  Download,
+  Copy,
+  FolderPlus,
+  Upload,
+  Star,
+  Edit,
+  ArrowRight,
+  Info,
+  Trash,
+} from "@gouvfr-lasuite/ui-components/icons";
+import { t } from "i18next";
+import {
+  itemToTreeItem,
+  useGlobalExplorer,
+} from "../components/GlobalExplorerContext";
+import { useDownloadItem } from "@/features/items/hooks/useDownloadItem";
+import { baseApiUrl } from "@/features/api/utils";
+import { ExplorerRenameItemModal } from "../components/modals/ExplorerRenameItemModal";
+import { ExplorerCreateFolderModal } from "../components/modals/ExplorerCreateFolderModal";
+import { ItemShareModal } from "../components/modals/share/ItemShareModal";
+import { useDeleteItem } from "./useDeleteItem";
+import { ExplorerMoveFolder } from "../components/modals/move/ExplorerMoveFolderModal";
+import { getParentIdFromPath, setManualNavigationItemId } from "../utils/utils";
+import { useRouter } from "next/router";
+import { useEffect, useState } from "react";
+import {
+  useMutationCreateFavoriteItem,
+  useMutationDeleteFavoriteItem,
+  useMutationDuplicateItem,
+} from "./useMutations";
+import { DefaultRoute } from "@/utils/defaultRoutes";
+import { getCanUploadErrorDescription } from "@/utils/entitlements";
+import {
+  addToast,
+  ToasterItem,
+} from "@/features/ui/components/toaster/Toaster";
+
+type UseItemActionMenuItemsOptions = {
+  onModalOpenChange?: (isModalOpen: boolean) => void;
+};
+
+type UseItemActionMenuItemsReturn = {
+  getMenuItems: (
+    item: Item,
+    options?: { minimal?: boolean; itemId?: string; allowCreate?: boolean },
+  ) => MenuItem[];
+  modals: React.ReactNode;
+  isModalOpen: boolean;
+};
+
+export const useItemActionMenuItems = ({
+  onModalOpenChange,
+}: UseItemActionMenuItemsOptions = {}): UseItemActionMenuItemsReturn => {
+  const router = useRouter();
+  const { setRightPanelForcedItem, setRightPanelOpen, ...explorerContext } =
+    useGlobalExplorer();
+  const { handleDownloadItem } = useDownloadItem();
+  const { deleteItems: deleteItem } = useDeleteItem();
+  const treeContext = useTreeContext();
+
+  const { mutateAsync: deleteFavoriteItem } = useMutationDeleteFavoriteItem();
+  const { mutateAsync: createFavoriteItem } = useMutationCreateFavoriteItem();
+  const { mutateAsync: duplicateItem } = useMutationDuplicateItem();
+
+  const shareItemModal = useModal();
+  const renameModal = useModal();
+  const moveModal = useModal();
+  const createFolderModal = useModal();
+
+  const [currentItem, setCurrentItem] = useState<Item | null>(null);
+
+  const isModalOpen =
+    renameModal.isOpen ||
+    shareItemModal.isOpen ||
+    moveModal.isOpen ||
+    createFolderModal.isOpen;
+
+  useEffect(() => {
+    onModalOpenChange?.(isModalOpen);
+  }, [isModalOpen]);
+
+  const handleFavorite = async (effectiveItemId: string, item: Item) => {
+    await createFavoriteItem(effectiveItemId, {
+      onSuccess: () => {
+        if (item.type !== ItemType.FOLDER) {
+          return;
+        }
+        const itemTree = itemToTreeItem(item, DefaultRoute.FAVORITES, true);
+        treeContext?.treeData.addChild(DefaultRoute.FAVORITES, itemTree);
+      },
+    });
+  };
+
+  const handleUnfavorite = async (effectiveItemId: string) => {
+    await deleteFavoriteItem(effectiveItemId);
+  };
+
+  const handleDelete = async (effectiveItemId: string, item: Item) => {
+    await deleteItem([effectiveItemId]);
+    const currentExplorerItem = explorerContext.item;
+    if (!currentExplorerItem) return;
+
+    const parentId = getParentIdFromPath(item.path);
+    const redirectId: string | undefined = parentId;
+
+    if (redirectId) {
+      setManualNavigationItemId(redirectId);
+      router.push(`/explorer/items/${redirectId}`);
+    } else {
+      router.push(`/explorer/items/my-files`);
+    }
+  };
+
+  const getMenuItems = (
+    item: Item,
+    options?: { minimal?: boolean; itemId?: string; allowCreate?: boolean },
+  ): MenuItem[] => {
+    const minimal = options?.minimal ?? false;
+    const allowCreate = options?.allowCreate ?? false;
+    const effectiveItemId = options?.itemId ?? item.originalId ?? item.id;
+    const effectiveItem = { ...item, id: effectiveItemId };
+    const showAddChildren = allowCreate;
+
+    return [
+      ...(showAddChildren
+        ? [
+            {
+              icon: <FolderPlus />,
+              label: t("explorer.actions.createFolder.modal.title"),
+              callback: () => {
+                setCurrentItem(effectiveItem);
+                createFolderModal.open();
+              },
+            },
+            {
+              icon: <Upload />,
+              label: t("explorer.tree.import.files"),
+              callback: () => {
+                document.getElementById("import-files")?.click();
+              },
+            },
+            { type: "separator" as const },
+          ]
+        : []),
+
+      {
+        icon: <Shared />,
+        label: t("explorer.item.actions.share"),
+        isHidden: !item.abilities?.accesses_view,
+        callback: () => {
+          setCurrentItem(effectiveItem);
+          shareItemModal.open();
+        },
+      },
+      {
+        icon: <Download />,
+        label: t("explorer.item.actions.download"),
+        isHidden: item.type === ItemType.FOLDER || minimal,
+        callback: () => {
+          handleDownloadItem(item);
+        },
+      },
+      {
+        icon: <Download />,
+        label: t("explorer.item.actions.download"),
+        isHidden: !item.abilities?.export || minimal,
+        callback: () => {
+          window.location.href = `${baseApiUrl()}items/${effectiveItemId}/export/`;
+        },
+      },
+      {
+        icon: <Copy />,
+        label: t("explorer.item.actions.duplicate"),
+        isHidden: !item.abilities?.duplicate || item.type === ItemType.FOLDER,
+        callback: async () => {
+          try {
+            await duplicateItem(effectiveItemId);
+          } catch (err) {
+            addToast(
+              <ToasterItem type="error">
+                <span className="material-icons">content_copy</span>
+                <span>
+                  {getCanUploadErrorDescription(err) ??
+                    t("explorer.item.actions.duplicate_error")}
+                </span>
+              </ToasterItem>,
+            );
+          }
+        },
+      },
+
+      {
+        icon: <Star />,
+        label: item.is_favorite
+          ? t("explorer.item.actions.unfavorite")
+          : t("explorer.item.actions.favorite"),
+        isHidden: !item.abilities?.retrieve,
+        callback: item.is_favorite
+          ? () => handleUnfavorite(effectiveItemId)
+          : () => handleFavorite(effectiveItemId, item),
+      },
+      { type: "separator" },
+      {
+        icon: <Edit />,
+        label: t("explorer.item.actions.rename"),
+        isHidden: !item.abilities?.update,
+        callback: () => {
+          setCurrentItem(effectiveItem);
+          renameModal.open();
+        },
+      },
+      {
+        icon: <ArrowRight />,
+        label: t("explorer.item.actions.move"),
+        isHidden: !item.abilities?.move || minimal,
+        callback: () => {
+          setCurrentItem(effectiveItem);
+          moveModal.open();
+        },
+      },
+      { type: "separator" },
+
+      {
+        icon: <Info />,
+        label: t("explorer.item.actions.view_info"),
+        isHidden: minimal,
+        callback: () => {
+          setRightPanelForcedItem(item);
+          setRightPanelOpen(true);
+        },
+      },
+      { type: "separator" },
+      {
+        icon: <Trash />,
+        label: t("explorer.item.actions.delete"),
+        variant: "danger" as const,
+        isHidden: !item.abilities?.destroy || item.main_workspace || minimal,
+        callback: () => handleDelete(effectiveItemId, item),
+      },
+    ];
+  };
+
+  const modals = (
+    <>
+      {currentItem && renameModal.isOpen && (
+        <ExplorerRenameItemModal
+          {...renameModal}
+          item={currentItem}
+          key={currentItem.id}
+        />
+      )}
+      {currentItem &&
+        currentItem.abilities?.accesses_view &&
+        shareItemModal.isOpen && (
+          <ItemShareModal
+            {...shareItemModal}
+            item={currentItem}
+            key={currentItem.id}
+          />
+        )}
+      {currentItem && moveModal.isOpen && (
+        <ExplorerMoveFolder
+          {...moveModal}
+          itemsToMove={[currentItem]}
+          key={currentItem.id}
+          initialFolderId={getParentIdFromPath(currentItem.path)}
+        />
+      )}
+      {currentItem && createFolderModal.isOpen && (
+        <ExplorerCreateFolderModal
+          {...createFolderModal}
+          parentId={currentItem.id}
+        />
+      )}
+    </>
+  );
+
+  return { getMenuItems, modals, isModalOpen };
+};

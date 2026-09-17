@@ -1,0 +1,27 @@
+{
+  "name": "main",
+  "version": "0.22.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=22.0.0 <25.0.0",
+    "yarn": "1.22.22"
+  },
+  "scripts": {
+    "dev": "yarn workspace drive run dev",
+    "build": "yarn workspace drive run build",
+    "lint": "yarn workspace drive run lint",
+    "build-theme": "yarn workspace drive build-theme"
+  },
+  "resolutions": {
+    "postcss": "8.5.26",
+    "sharp": "0.35.3"
+  },
+  "devDependencies": {
+    "turbo": "2.9.14"
+  },
+  "packageManager": "yarn@1.22.22"
+}

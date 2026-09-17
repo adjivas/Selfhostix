@@ -1,0 +1,18 @@
+# explicitly list the files needed by docker.
+*
+!package.json
+!yarn.lock
+!tsconfig-ext.json
+!tsconfig-prod.json
+!tsconfig.json
+!stubs
+!app
+!buildtools
+!static
+!bower_components
+!sandbox
+!plugins
+!test
+!ext
+**/_build
+/sandbox/pyodide/worker/node_modules

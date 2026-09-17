@@ -1,0 +1,13 @@
+{
+    "sendAppPage": {
+        "og-title": "Grist, de evolutie van spreadsheets",
+        "Loading...": "Aan het laden...",
+        "og-description": "Een modern, open source spreadsheet dat verder gaat dan de matrix van cellen"
+    },
+    "oidc": {
+        "emailNotVerifiedError": "Verifieer uw e-mailadres bij de identiteitsprovider en log opnieuw in."
+    },
+    "access": {
+        "docNoAccess": "U heeft geen toegang tot dit document."
+    }
+}

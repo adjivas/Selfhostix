@@ -1,0 +1,608 @@
+import { BrowserSettings } from "app/common/BrowserSettings";
+import { CommClientConnect, CommMessage, CommResponse, CommResponseError } from "app/common/CommTypes";
+import { delay } from "app/common/delay";
+import { ErrorWithCode } from "app/common/ErrorWithCode";
+import { ActiveDoc } from "app/server/lib/ActiveDoc";
+import { AuthSession } from "app/server/lib/AuthSession";
+import { DocSession, DocSessionPrecursor } from "app/server/lib/DocSession";
+import { GristServerSocket } from "app/server/lib/GristServerSocket";
+import log from "app/server/lib/log";
+import { LogMethods } from "app/server/lib/LogMethods";
+import { MemoryPool } from "app/server/lib/MemoryPool";
+import { fromCallback } from "app/server/lib/serverUtils";
+import { shortDesc } from "app/server/lib/shortDesc";
+
+import * as crypto from "crypto";
+import { IncomingMessage } from "http";
+
+import { i18n } from "i18next";
+
+import type { Comm } from "app/server/lib/Comm";
+
+// How many messages and bytes to accumulate for a disconnected client before booting it.
+// The benefit is that a client who temporarily disconnects and reconnects without missing much,
+// would not need to reload the document.
+const clientMaxMissedMessages = 100;
+const clientMaxMissedBytes = 1_000_000;
+
+export type ClientMethod = (client: Client, ...args: any[]) => Promise<unknown>;
+
+// How long the client state persists after a disconnect.
+const clientRemovalTimeoutMs = 300 * 1000;   // 300s = 5 minutes.
+
+// How much memory to allow using for large JSON responses before waiting for some to clear.
+// Max total across all clients and all JSON responses.
+const jsonResponseTotalReservation = 500 * 1024 * 1024;
+// Estimate of a single JSON response, used before we know how large it is. Together with the
+// above, it works to limit parallelism (to 25 responses that can be started in parallel).
+const jsonResponseReservation = 20 * 1024 * 1024;
+export const jsonMemoryPool = new MemoryPool(jsonResponseTotalReservation);
+
+// A hook for dependency injection.
+export const Deps = { clientRemovalTimeoutMs, jsonResponseReservation };
+
+/**
+ * Generates and returns a random string to use as a clientId. This is better
+ * than numbering clients with consecutive integers; otherwise a reconnecting
+ * client presenting the previous clientId to a restarted (new) server may
+ * accidentally associate itself with a wrong session that happens to share the
+ * same clientId. In other words, we need clientIds to be unique across server
+ * restarts.
+ * @returns {String} - random string to use as a new clientId.
+ */
+function generateClientId(): string {
+  // Non-blocking version of randomBytes may fail if insufficient entropy is available without
+  // blocking. If we encounter that, we could either block, or maybe use less random values.
+  return crypto.randomBytes(8).toString("hex");
+}
+
+/**
+ * These are the types of messages that are allowed to be sent to the client even if the client is
+ * not authorized to use this instance (e.g. not a member of the team for this subdomain).
+ */
+const MESSAGE_TYPES_NO_AUTH = new Set([
+  "clientConnect",
+]);
+
+void (MESSAGE_TYPES_NO_AUTH);
+
+/**
+ * Class that encapsulates the information for a client. A Client may survive
+ * across multiple websocket reconnects.
+ * TODO: this could provide a cleaner interface.
+ *
+ * @param comm: parent Comm object
+ * @param websocket: websocket connection
+ * @param methods: a mapping from method names to server methods (must return promises)
+ */
+export class Client {
+  // Confidential to the backend and client themselves - should not be shared
+  public readonly clientId: string;
+  // Can be distributed as a unique identifier for this client
+  public readonly publicClientId: string;
+
+  public browserSettings: BrowserSettings = {};
+
+  private _log = new LogMethods("Client ", (extra?: object | null) => this.getLogMeta(extra || {}));
+
+  // Maps docFDs to DocSession objects.
+  private _docFDs: (DocSession | null)[] = [];
+
+  private _missedMessages = new Map<number, string>();
+  private _missedMessagesTotalLength: number = 0;
+  private _destroyTimer: NodeJS.Timeout | null = null;
+  private _destroyed: boolean = false;
+  private _websocket: GristServerSocket | null = null;
+  private _req: IncomingMessage | null = null;
+  private _authSession: AuthSession = AuthSession.unauthenticated();
+  private _nextSeqId: number = 0;     // Next sequence-ID for messages sent to the client
+
+  // Start of the range of sequence-IDs _missedMessages can account for. Below it, we have nothing
+  // to say. From it on, anything we are not holding was sent. Only _dropMissedMessages() sets it.
+  private _missedMessagesWindowStart: number = 0;
+
+  // Set when we have handed a client messages and let go of them. If it comes back saying it
+  // received nothing, they are gone. Cleared once it comes back able to account for them.
+  private _handoverUnconfirmed: boolean = false;
+
+  // Set when we have told a client to reload, until one turns up that has. The demand goes out
+  // over a connection that has just proved unreliable, and by then we have moved past the
+  // messages we could not account for, so nothing else would be left to say it again.
+  private _reloadPending: boolean = false;
+
+  // Last request-ID read off the socket, or null if none. Requests arrive in order, so this says
+  // which of the client's outstanding requests reached us.
+  private _lastReceivedReqId: number | null = null;
+
+  // Identifier for the current GristWSConnection object connected to this client.
+  private _counter: string | null = null;
+  private _i18Instance?: i18n;
+
+  constructor(
+    private _comm: Comm,
+    private _methods: Map<string, ClientMethod>,
+    private _locale: string,
+    i18Instance?: i18n,
+  ) {
+    this.clientId = generateClientId();
+    this.publicClientId = generateClientId();
+    this._i18Instance = i18Instance?.cloneInstance({
+      lng: this._locale,
+    });
+  }
+
+  public toString() { return `Client ${this.clientId} #${this._counter}`; }
+
+  public t(key: string, args?: any): string {
+    return this._i18Instance?.t(key, args) ?? key;
+  }
+
+  public setConnection(options: {
+    websocket: GristServerSocket;
+    req: IncomingMessage;
+    counter: string | null;
+    browserSettings: BrowserSettings;
+    authSession: AuthSession;
+  }) {
+    const { websocket, req, counter, browserSettings } = options;
+    this._websocket = websocket;
+    this._req = req;
+    this._counter = counter;
+    this.browserSettings = browserSettings;
+    if (!browserSettings.locale) { browserSettings.locale = this._locale; }
+    this._authSession = options.authSession;
+
+    websocket.onerror = (err: Error) => this._onError(err);
+    websocket.onclose = () => this._onClose();
+    websocket.onmessage = (msg: string) => this._onMessage(msg);
+  }
+
+  public get authSession(): AuthSession {
+    return this._authSession;
+  }
+
+  public getConnectionRequest(): IncomingMessage | null {
+    return this._req;
+  }
+
+  public isConnected(): boolean {
+    return Boolean(this._websocket);
+  }
+
+  /**
+   * Returns DocSession for the given docFD, or throws an exception if this doc is not open.
+   */
+  public getDocSession(fd: number): DocSession {
+    const docSession = this._docFDs[fd];
+    if (!docSession) {
+      throw new Error(`Invalid docFD ${fd}`);
+    }
+    return docSession;
+  }
+
+  // Adds a new DocSession to this Client, and returns the new FD for it.
+  public addDocSession(activeDoc: ActiveDoc, docSessionPrecursor: DocSessionPrecursor): DocSession {
+    const fd = this._getNextDocFD();
+    const docSession = new DocSession(docSessionPrecursor, activeDoc, fd);
+    this._docFDs[fd] = docSession;
+    return docSession;
+  }
+
+  // Removes a DocSession from this Client, called when a doc is closed.
+  public removeDocSession(fd: number): void {
+    this._docFDs[fd] = null;
+  }
+
+  /**
+   * Closes all docs. Returns the number of documents closed.
+   */
+  public closeAllDocs(): number {
+    let count = 0;
+    for (let fd = 0; fd < this._docFDs.length; fd++) {
+      const docSession = this._docFDs[fd];
+      if (docSession?.activeDoc) {
+        // Note that this indirectly calls to removeDocSession(docSession.fd)
+        docSession.activeDoc.closeDoc(docSession)
+          .catch((e) => { this._log.warn(null, "error closing docFD %d", fd); });
+        count++;
+      }
+      this._docFDs[fd] = null;
+    }
+    return count;
+  }
+
+  public interruptConnection() {
+    if (this._websocket) {
+      this._websocket.removeAllListeners();
+      // It is important to keep an onerror handler, since otherwise
+      // errors bring down the server.
+      this._websocket.onerror = (err: Error) => {
+        this._log.warn(null, "Error after interruption", err);
+      };
+      this._websocket.terminate();  // close() is inadequate when ws routed via loadbalancer
+      this._websocket = null;
+    }
+  }
+
+  /**
+   * Sends a message to the client. If the send fails in a way that the message can't get queued
+   * (e.g. due to an unexpected exception in code), logs an error and interrupts the connection.
+   */
+  public async sendMessageOrInterrupt(messageObj: CommMessage | CommResponse | CommResponseError): Promise<void> {
+    try {
+      await this.sendMessage(messageObj);
+    } catch (e) {
+      this._log.error(null, "sendMessage error", e);
+      this.interruptConnection();
+    }
+  }
+
+  /**
+   * Sends a message to the client, queuing it up on failure or if the client is disconnected.
+   */
+  public async sendMessage(messageObj: CommMessage | CommResponse | CommResponseError): Promise<void> {
+    if (this._destroyed) {
+      return;
+    }
+
+    // Large responses require memory; with many connected clients this can crash the server. We
+    // manage it using a MemoryPool, waiting for free space to appear. This only controls the
+    // memory used to hold the JSON.stringify result. Once sent, the reservation is released.
+    //
+    // Actual process memory will go up also as the outgoing data is sitting in socket buffers,
+    // but this isn't part of Node's heap. If an outgoing buffer is full, websocket.send may
+    // block, and MemoryPool will delay other responses. There is a risk here of unresponsive
+    // clients exhausing the MemoryPool, perhaps intentionally. To mitigate, we could destroy
+    // clients that are too slow in reading. This isn't currently done.
+    //
+    // Also, we do not manage memory of responses moved to a client's _missedMessages queue. But
+    // we do limit those in size.
+    //
+    // Overall, a better solution would be to stream large responses, or to have the client
+    // request data piecemeal (as we'd have to for handling large data).
+
+    await jsonMemoryPool.withReserved(Deps.jsonResponseReservation, async (updateReservation) => {
+      if (this._destroyed) {
+        // If this Client got destroyed while waiting, stop here and release the reservation.
+        return;
+      }
+      const seqId = this._nextSeqId++;
+      const message: string = JSON.stringify({ ...messageObj, seqId });
+      const size = Buffer.byteLength(message, "utf8");
+      updateReservation(size);
+
+      // Log something useful about the message being sent.
+      if ("error" in messageObj && messageObj.error) {
+        this._log.warn(null, "responding to #%d ERROR %s", messageObj.reqId, messageObj.error);
+      }
+
+      if (this._websocket) {
+        // If we have a websocket, send the message.
+        try {
+          await this._sendToWebsocket(message);
+          // NOTE: A successful send does NOT mean the message was received. For a better system, see
+          // https://docs.microsoft.com/en-us/azure/azure-web-pubsub/howto-develop-reliable-clients
+          // (keeping a copy of messages until acked). With our system, we are more likely to be
+          // lacking the needed messages on reconnect, and having to reset the client.
+          return;
+        } catch (err) {
+          // Sending failed. Add the message to missedMessages.
+          this._log.warn(null, "sendMessage: queuing after send error:", err.toString());
+        }
+      }
+      if (this._missedMessages.size < clientMaxMissedMessages &&
+        this._missedMessagesTotalLength + message.length <= clientMaxMissedBytes) {
+        // Queue up the message.
+        // TODO: this keeps the memory but releases jsonMemoryPool reservation, which is wrong --
+        // it may allow too much memory to be used. This situation is rare, however, so maybe OK
+        // as is. Ideally, the queued messages could reserve memory in a "nice to have" mode, and
+        // if memory is needed for something more important, the queue would get dropped.
+        // (Holding on to the memory reservation here would creates a risk of freezing future
+        // responses, which seems *more* dangerous than a crash because a crash would at least
+        // lead to an eventual recovery.)
+        this._missedMessages.set(seqId, message);
+        this._missedMessagesTotalLength += message.length;
+      } else {
+        // Too many messages queued. Boot the client now, to make it reset when/if it reconnects.
+        this._log.warn(null, "sendMessage: too many messages queued; booting client");
+        this.destroy();
+      }
+    });
+  }
+
+  /**
+   * Called from Comm.ts to decide whether this Client is available to accept a new connection
+   * that requests the same clientId, that's authenticated as authSession.
+   */
+  public canAcceptConnection(authSession: AuthSession): boolean {
+    // Refuse reconnect if another websocket is currently active. It may be a new browser tab
+    // (which may reuse clientId from a copy of sessinStorage). It will need its own Client object.
+    //
+    // Also refuse if the reconnecting user differs from this Client's, for stronger security, so
+    // that we don't treat a clientId on its own as a secret sufficient to impersonate a user.
+    //
+    // UserId can't tell apart credentialed sessions (OAuth / access-token auth). Don't let them
+    // reconnect and reuse a Client; if the "reuse" optimization ever becomes relevant for those,
+    // we can relax this by checking the compatibility of authSession.credentials.
+    return !this._websocket && this._authSession.userId === authSession.userId &&
+      !this._authSession.credential && !authSession.credential;
+  }
+
+  /**
+   * Complete initialization of a new connection, and send the initial 'clientConnect' message.
+   * See comments at the top of app/server/lib/Comm.ts for some relevant notes.
+   */
+  public async sendConnectMessage(
+    newClient: boolean, reuseClient: boolean, lastSeqId: number | null, parts: Partial<CommClientConnect>,
+  ): Promise<void> {
+    if (this._destroyTimer) {
+      clearTimeout(this._destroyTimer);
+      this._destroyTimer = null;
+    }
+
+    let missedMessages: string[] | undefined = undefined;
+    let seamlessReconnect = false;
+    if (!newClient && reuseClient && await this._isAuthorized()) {
+      // Websocket-level reconnect: existing browser tab reconnected to an existing Client object.
+      // We also check that the Client is still authorized to access all open docs. If not, we'll
+      // close the docs and tell the Client to reload the app.
+      missedMessages = this.getMissedMessages(lastSeqId);
+      if (missedMessages) {
+        // We have all the needed messages (possibly an empty array); can do a seamless reconnect.
+        // No gap also means the client accounted for what we handed it before, so that is settled.
+        seamlessReconnect = true;
+        this._handoverUnconfirmed = false;
+      }
+    }
+
+    // Everything below this is either in the missedMessages we just collected, or went to an
+    // earlier connection. Anything from here on is sent live.
+    const collectedThrough = this._nextSeqId;
+
+    if (newClient) {
+      // A reloaded tab keeps its clientId but numbers its requests afresh from zero, so what we
+      // remember from its previous life would be misleadingly high. Nothing we handed the page
+      // before is in doubt any more either, since this one never asked for it.
+      this._lastReceivedReqId = null;
+      this._handoverUnconfirmed = false;
+    }
+
+    // An existing browser client that can't recover, or that connected to a new Client object,
+    // will need to reopen docs. Tell it to reload.
+    const needReload = !newClient && !seamlessReconnect;
+
+    this._reloadPending = needReload;
+
+    let docsClosed: number | null = null;
+    if (!seamlessReconnect) {
+      // The browser client can't recover from missed messages and will need to reopen docs, so
+      // what we hold is of no use to it. Close all docs we kept open. If it's a new Client
+      // object, this is a no-op.
+      this._dropMissedMessages(collectedThrough);
+      docsClosed = this.closeAllDocs();
+    }
+
+    this._log.debug({ newClient, needReload, docsClosed, missedMessages: missedMessages?.length },
+      "sending clientConnect");
+
+    // Don't use sendMessage here, since we don't want to queue up this message on failure.
+    const clientConnectMsg: CommClientConnect = {
+      ...parts,
+      type: "clientConnect",
+      clientId: this.clientId,
+      missedMessages,
+      needReload,
+      // Only meaningful when resuming the session; otherwise no earlier request survives.
+      lastReceivedReqId: seamlessReconnect ? (this._lastReceivedReqId ?? "none") : undefined,
+    };
+
+    try {
+      await this._sendToWebsocket(JSON.stringify(clientConnectMsg));
+
+      // Only let go once the send has gone through. If it throws, the client learned nothing of
+      // what it missed, and can ask again when it next connects.
+      this._dropMissedMessages(collectedThrough);
+      if (missedMessages?.length) {
+        // A successful send is not proof of arrival, so we are owed an account of these.
+        this._handoverUnconfirmed = true;
+      }
+
+      if (needReload) {
+        // If the client should reload, close the socket without waiting. This connection should
+        // not be used anyway, and we want it released by the time the new connection comes in.
+        this._websocket?.close();
+        return;
+      }
+
+      // A heavy-handed fix to T396, since 'clientConnect' is sometimes not seen in the browser,
+      // (seemingly when the 'message' event is triggered before 'open' on the native WebSocket.)
+      // See also my report at https://stackoverflow.com/a/48411315/328565
+      await delay(250);
+
+      if (!this._destroyed && this._websocket?.isOpen) {
+        await this._sendToWebsocket(JSON.stringify({ ...clientConnectMsg, dup: true }));
+      }
+    } catch (err) {
+      // It's possible that the connection was closed while we were preparing this response.
+      // We just warn, and let _onClose() take care of cleanup.
+      this._log.warn(null, "failed to prepare or send clientConnect:", err.toString());
+    }
+  }
+
+  // Get messages in order of their key in the _missedMessages map. A null lastSeqId means the
+  // client received no numbered message at all on its last connection, so everything we hold
+  // is news to it.
+  //
+  // Returning undefined for a gap is load-bearing: it forces needReload, and only that stops a
+  // client waiting on requests it had in flight.
+  public getMissedMessages(lastSeqId: number | null): string[] | undefined {
+    // Neither a client we are still waiting to see reload, nor one that cannot account for what
+    // we handed it, has anything to resume. Report a gap for both.
+    if (this._reloadPending || (lastSeqId === null && this._handoverUnconfirmed)) { return; }
+    const firstNeeded = lastSeqId === null ? this._missedMessagesWindowStart : lastSeqId + 1;
+    const result: string[] = [];
+    for (let i = firstNeeded; i < this._nextSeqId; i++) {
+      const m = this._missedMessages.get(i);
+      if (m === undefined) { return; }
+      result.push(m);
+    }
+    return result;
+  }
+
+  /**
+   * Destroys a client. If the same browser window reconnects later, it will get a new Client
+   * object and clientId.
+   */
+  public destroy() {
+    const docsClosed = this.closeAllDocs();
+    this._log.info({ docsClosed }, "client gone");
+    if (this._destroyTimer) {
+      clearTimeout(this._destroyTimer);
+      this._destroyTimer = null;
+    }
+    this._dropMissedMessages(this._nextSeqId);
+    this._comm.removeClient(this);
+    this._destroyed = true;
+  }
+
+  public getLogMeta(meta: log.ILogMeta = {}): log.ILogMeta {
+    return {
+      ...meta,
+      ...this._authSession.getLogMeta(),
+      clientId: this.clientId,    // identifies a client connection, essentially a websocket
+      counter: this._counter,     // identifies a GristWSConnection in the connected browser tab
+    };
+  }
+
+  private async _onMessage(message: string): Promise<void> {
+    try {
+      await this._onMessageImpl(message);
+    } catch (err) {
+      this._log.warn(null, 'onMessage error received for message "%s": %s', shortDesc(message), err.stack);
+    }
+  }
+
+  /**
+   * Processes a request from a client. All requests from a client get a response, at least to
+   * indicate success or failure.
+   */
+  private async _onMessageImpl(message: string): Promise<void> {
+    const request = JSON.parse(message);
+    if (request.beat) {
+      // this is a heart beat, to keep the websocket alive.  No need to reply.
+      log.rawInfo("heartbeat", {
+        ...this.getLogMeta(),
+        url: request.url,
+        docId: request.docId,  // caution: trusting client for docId for this purpose.
+      });
+      return;
+    }
+    if (typeof request.reqId === "number") {
+      this._lastReceivedReqId = request.reqId;
+    }
+    let response: CommResponse | CommResponseError;
+    const method = this._methods.get(request.method);
+    if (!method) {
+      this._log.info(null, "onMessage: unknown method", shortDesc(message));
+      response = { reqId: request.reqId, error: `Unknown method ${request.method}` };
+    } else {
+      try {
+        response = { reqId: request.reqId, data: await method(this, ...request.args) };
+      } catch (error) {
+        const err: ErrorWithCode = error;
+        // Print the error stack, except for SandboxErrors, for which the JS stack isn't that useful.
+        // Also not helpful is the stack of AUTH_NO_VIEW|EDIT errors produced by the Authorizer.
+        const code: unknown = err.code;
+        const skipStack = (
+          !err.stack ||
+          err.stack.match(/^SandboxError:/) ||
+          (typeof code === "string" && code.startsWith("AUTH_NO"))
+        );
+
+        this._log.warn(null, "Responding to method %s with error: %s %s",
+          request.method, skipStack ? err : err.stack, code || "");
+        response = { reqId: request.reqId, error: err.message };
+        if (err.code) {
+          response.errorCode = err.code;
+        }
+        if (err.details) {
+          response.details = err.details;
+        }
+        if (err.status) {
+          response.status = err.status;
+        }
+        if (typeof code === "string" && code === "AUTH_NO_EDIT" && err.accessMode === "fork") {
+          response.shouldFork = true;
+        }
+      }
+    }
+    await this.sendMessageOrInterrupt(response);
+  }
+
+  // Check that client still has access to all documents.  Used to determine whether
+  // a Comm client can be safely reused after a reconnect.  Without this check, the client
+  // would be reused even if access to a document has been lost (although an error would be
+  // issued later, on first use of the document).
+  private async _isAuthorized(): Promise<boolean> {
+    for (const docFD of this._docFDs) {
+      try {
+        if (docFD !== null) { await docFD.authorizer.assertAccess("viewers"); }
+      } catch (e) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Returns the next unused docFD number.
+  private _getNextDocFD(): number {
+    let fd = 0;
+    while (this._docFDs[fd]) { fd++; }
+    return fd;
+  }
+
+  // Let go of messages held for a disconnected client, up to but not including seqId. The window
+  // start moves with them, so getMissedMessages() can tell "never held that" from "held it once".
+  private _dropMissedMessages(seqId: number) {
+    for (const [key, message] of this._missedMessages) {
+      if (key < seqId) {
+        this._missedMessages.delete(key);
+        this._missedMessagesTotalLength -= message.length;
+      }
+    }
+    this._missedMessagesWindowStart = Math.max(this._missedMessagesWindowStart, seqId);
+  }
+
+  private _sendToWebsocket(message: string): Promise<void> {
+    return fromCallback(cb => this._websocket!.send(message, cb));
+  }
+
+  /**
+   * Processes an error on the websocket.
+   */
+  private _onError(err: Error) {
+    this._log.warn(null, "onError", err);
+    // TODO Make sure that this is followed by onClose when the connection is lost.
+  }
+
+  /**
+   * Processes the closing of a websocket.
+   */
+  private _onClose() {
+    this._websocket?.removeAllListeners();
+
+    // Remove all references to the websocket.
+    this._websocket = null;
+
+    if (!this._destroyed) {
+      // Schedule the client to be destroyed after a timeout. The timer gets cleared if the same
+      // client reconnects in the interim.
+      if (this._destroyTimer) {
+        this._log.warn(null, "clearing previously scheduled destruction");
+        clearTimeout(this._destroyTimer);
+      }
+      this._log.info(null, "websocket closed; will discard client in %s sec", Deps.clientRemovalTimeoutMs / 1000);
+      this._destroyTimer = setTimeout(() => this.destroy(), Deps.clientRemovalTimeoutMs);
+    }
+  }
+}

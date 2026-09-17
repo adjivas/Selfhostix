@@ -1,0 +1,76 @@
+name: Docker Hub Workflow
+run-name: Docker Hub Workflow
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "main"
+    tags:
+      - "v*"
+  pull_request:
+    branches:
+      - "main"
+
+env:
+  DOCKER_USER: 1001:127
+  SHOULD_PUSH: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'preview') }}
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-push-backend:
+    uses: ./.github/workflows/docker-publish.yml
+    permissions:
+      contents: read
+    secrets: inherit
+    with:
+      image_name: lasuite/impress-backend
+      context: .
+      file: Dockerfile
+      target: backend-production
+      should_push: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'preview') }}
+      docker_user: 1001:127
+
+  build-and-push-frontend:
+    uses: ./.github/workflows/docker-publish.yml
+    permissions:
+      contents: read
+    secrets: inherit
+    with:
+      image_name: lasuite/impress-frontend
+      context: .
+      file: src/frontend/Dockerfile
+      target: frontend-production
+      arm64_reuse_amd64_build_arg: "FRONTEND_IMAGE"
+      should_push: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'preview') }}
+      docker_user: 1001:127
+
+  build-and-push-y-provider:
+    uses: ./.github/workflows/docker-publish.yml
+    permissions:
+      contents: read
+    secrets: inherit
+    with:
+      image_name: lasuite/impress-y-provider
+      context: .
+      file: src/frontend/servers/y-provider/Dockerfile
+      target: y-provider
+      should_push: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'preview') }}
+      docker_user: 1001:127
+
+  notify-argocd:
+    needs:
+      - build-and-push-backend
+      - build-and-push-frontend
+      - build-and-push-y-provider
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'preview')
+    steps:
+      - uses: numerique-gouv/action-argocd-webhook-notification@cac2ee67896eb13e84e804f60c4271370424eaa8 # main
+        id: notify
+        with:
+          deployment_repo_path: "${{ secrets.DEPLOYMENT_REPO_URL }}"
+          argocd_webhook_secret: "${{ secrets.ARGOCD_PREPROD_WEBHOOK_SECRET }}"
+          argocd_url: "${{ vars.ARGOCD_PREPROD_WEBHOOK_URL }}"

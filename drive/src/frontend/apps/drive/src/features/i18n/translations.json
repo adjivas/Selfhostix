@@ -1,0 +1,2129 @@
+{
+  "en-us": {
+    "translation": {
+      "entitlements": {
+        "can_upload": {
+          "cannot_upload": "You don't have the necessary rights to transfer files."
+        },
+        "disclaimers": {
+          "close": "OK",
+          "cannot_upload": {
+            "title": "Uploads are unavailable",
+            "user_quota_exceeded": {
+              "description": "You can no longer add documents, your personal quota has been reached. Contact your administrator."
+            },
+            "user_override_quota_exceeded": {
+              "description": "You can no longer add documents, your personal storage limit has been reached. Contact your administrator."
+            },
+            "organization_quota_exceeded": {
+              "description": "You can no longer add documents, your organization quota has been reached. Contact your administrator."
+            },
+            "no_organization": {
+              "description": "Your account isn't linked to an organization, so you can't upload files yet. Contact your administrator to get access."
+            },
+            "not_activated": {
+              "description": "File upload isn't activated for your organization yet. Contact your administrator to enable it."
+            },
+            "potential_operators": {
+              "description": "Here is the list of potential operators for you, register on their website to get access.",
+              "link": "Register"
+            }
+          }
+        }
+      },
+      "401": {
+        "title": "You need to be logged in to access the documents.",
+        "button": "Login"
+      },
+      "403": {
+        "title": "You don't have the necessary permissions to access this page.",
+        "button": "Home"
+      },
+      "settings_modal": {
+        "title": "Settings",
+        "tabs": {
+          "storage": {
+            "title": "Storage"
+          }
+        }
+      },
+      "quota": {
+        "gauge": {
+          "exceeded_locked": {
+            "title": "Organization quota exceeded",
+            "label": "Contact an administrator to increase the quota",
+            "reason": {
+              "organization_quota_exceeded": {
+                "description": "Org. quota exceeded"
+              }
+            }
+          },
+          "error": {
+            "title": "Quota error",
+            "label": "Contact support to resolve the error",
+            "tooltip": "Error: {{error}}"
+          }
+        }
+      },
+      "share_modal": {
+        "options": {
+          "link_reach": {
+            "authenticated": "Connected",
+            "public": "Public",
+            "restricted": "Private"
+          },
+          "subtext": {
+            "reader": "Can view only",
+            "editor": "Can view and edit content",
+            "admin": "Can edit and manage access",
+            "owner": "Full control and can delete"
+          },
+          "top_message": {
+            "only_owner": "You cannot change your role as you are the only owner.",
+            "to_lower_role": "Inherited. To lower role or remove access, edit the parent folder.",
+            "inherited_edit": "Inherited. To lower role or remove access, edit",
+            "parent_folder": "the parent folder."
+          }
+        }
+      },
+      "file_download_modal": {
+        "error": {
+          "no_url_or_title": "This file has no URL or title."
+        },
+        "suspicious": {
+          "title": "This file is suspicious"
+        },
+        "file_too_large_to_analyze": {
+          "title": "This file is too large to be scanned"
+        },
+        "analyzing": {
+          "title": "This file is still being scanned"
+        },
+        "description": "Are you sure you want to download this file?",
+        "download": "Download anyway",
+        "cancel": "Cancel"
+      },
+      "common": {
+        "cancel": "Cancel"
+      },
+      "clipboard": {
+        "success": "Copied to clipboard",
+        "error": "Failed to copy to clipboard"
+      },
+      "app_title": "Drive",
+      "app_description": "Files management",
+      "welcome": "Welcome",
+      "logout": "Logout",
+      "login": "Login",
+      "my_account": "My Account",
+      "api": {
+        "error": {
+          "unexpected": "An unexpected error occurred."
+        }
+      },
+      "home": {
+        "title": "Easy storage and sharing",
+        "subtitle": "A modern, high-performance drive built for French public teams. Sovereign hosting in France, strong security, and seamless sync with all LaSuite apps. On par with the market’s best—without the data trade-offs.",
+        "main_button": "Sign in",
+        "more": "Learn more"
+      },
+      "feedback": {
+        "button": "Give feedback",
+        "modal": {
+          "title": "New feedback",
+          "description": "Drive is under development: your feedback matters! Choose how to share your ideas:",
+          "buttons": {
+            "form": {
+              "title": "Give quick feedback",
+              "description": "30 sec to tell us what you think or report a bug"
+            },
+            "tchap": {
+              "title": "Write on Tchap",
+              "description": "Direct exchange with our team"
+            },
+            "visio": {
+              "title": "Talk on video",
+              "description": "20 min for an in-depth discussion"
+            }
+          }
+        }
+      },
+      "feedback_widget": {
+        "shortTitle": "Feedback?",
+        "title": "Do you have any feedback?",
+        "placeholder": "Share your feedback here...",
+        "email_placeholder": "Your email...",
+        "submit_text": "Send Feedback",
+        "success_text": "Thank you for your feedback!",
+        "success_text2": "In case of questions, we'll get back to you soon."
+      },
+      "authentication": {
+        "error": {
+          "alpha": "This application is in alpha and its access is restricted.",
+          "user_cannot_access_app": "You do not have the necessary permissions to access this application. Contact your administrator."
+        }
+      },
+      "mime": {
+        "calc": "Spreadsheet",
+        "doc": "Document",
+        "image": "Image",
+        "other": "Other",
+        "pdf": "PDF",
+        "powerpoint": "Presentation",
+        "audio": "Audio",
+        "video": "Video",
+        "archive": "Archive"
+      },
+      "roles": {
+        "administrator": "Administrator",
+        "editor": "Editor",
+        "reader": "Reader",
+        "owner": "Owner"
+      },
+      "explorer": {
+        "breadcrumbs": {
+          "spaces": "Spaces",
+          "all_folders": "All folders"
+        },
+        "modal": {
+          "move": {
+            "title": "Move",
+            "move_button": "Move here",
+            "move_to_root": "Move to root",
+            "aria_label": "Move folder modal",
+            "description_one_item": "Choose the new location for <strong>{{name}}</strong>",
+            "description_multiple_items": "Choose the new location for the <strong>{{count}}</strong> selected elements",
+            "errors": {
+              "user_quota_exceeded": "You can no longer move documents to the root, your personal quota has been reached. Contact your administrator.",
+              "user_override_quota_exceeded": "You can no longer move documents to the root, your personal storage limit has been reached. Contact your administrator.",
+              "organization_quota_exceeded": "You can no longer move documents to the root, your organization quota has been reached. Contact your administrator.",
+              "no_organization": "Your account isn't linked to an organization, so you can't move documents to the root yet. Contact your administrator to get access.",
+              "not_activated": "File upload isn't activated for your organization yet, so you can't move documents to the root. Contact your administrator to enable it."
+            }
+          }
+        },
+        "drag_overlay": {
+          "files_selected_one": "{{count}} file selected",
+          "files_selected_other": "{{count}} files selected",
+          "cannot_move_file": "You don't have the rights to move this document",
+          "cannot_move_folder": "You don't have the rights to move this folder"
+        },
+        "rightPanel": {
+          "suspicious": {
+            "text": "This file looks suspicious. It is only visible to you."
+          },
+          "file_too_large_to_analyze": {
+            "text": "This file is too large to scan. It may be unsafe to download."
+          },
+          "multipleSelection": {
+            "text": "Multiple files selected",
+            "alt": "Multiple files selected image"
+          },
+          "empty": {
+            "text": "No files selected",
+            "alt": "No files selected image"
+          },
+          "sharing": "Sharing",
+          "share": "Share",
+          "format": "Format",
+          "updated_at": "Updated at",
+          "created_at": "Created at",
+          "size": "Size",
+          "created_by": "Created by",
+          "description": "Description"
+        },
+        "grid": {
+          "name": "Name",
+          "last_update": "Last Update",
+          "columns": {
+            "last_modified": "Last modified",
+            "created": "Created",
+            "created_by": "Created by",
+            "file_type": "File type",
+            "file_size": "File size",
+            "folder": "Folder",
+            "default_suffix": "(default)"
+          },
+          "size_units": {
+            "B": "B",
+            "KB": "KB",
+            "MB": "MB",
+            "GB": "GB",
+            "TB": "TB",
+            "PB": "PB"
+          },
+          "sort": {
+            "ascending": "Sort ascending",
+            "descending": "Sort descending",
+            "reset": "Reset sorting"
+          },
+          "empty": {
+            "default": "No folder found in the selected folder",
+            "caption": {
+              "default": "This tab is empty",
+              "folder": "This folder is empty"
+            },
+            "caption_no_create": "You do not have permission to add files",
+            "cta": {
+              "default": "Import or create files and folders here.",
+              "recent": "Files and folders will appear here in order of their last modification.",
+              "shared_with_me": "Files and folders shared with you will appear here.",
+              "favorites": "Favorite files and folders will appear here.",
+              "trash": "Deleted files and folders will appear here.",
+              "no_create": "You cannot add files or create folders because you do not have the necessary permissions."
+            }
+          },
+          "no_url": "This resource does not have an URL",
+          "actions": {
+            "button_aria_label": "More actions for {{name}}",
+            "info": "Info",
+            "share": "Share",
+            "download": "Download",
+            "rename": "Rename",
+            "move": "Move",
+            "duplicate": "Duplicate",
+            "delete": "Delete",
+            "restore": "Restore",
+            "hard_delete": "Delete forever"
+          }
+        },
+        "filters": {
+          "location": {
+            "label": "Location",
+            "options": {
+              "my_files": "My files",
+              "shared_with_me": "Shared with me",
+              "starred": "Starred",
+              "trashbin": "Trash"
+            }
+          },
+          "scopes": {
+            "label": "Location",
+            "options": {
+              "all": "Drive",
+              "trash": "Recycle bin"
+            }
+          },
+          "type": {
+            "label": "Type",
+            "options": {
+              "all": "All",
+              "file": "File",
+              "folder": "Folder",
+              "reset": "Reset"
+            }
+          },
+          "category": {
+            "label": "Type",
+            "options": {
+              "doc": "Text document",
+              "powerpoint": "Slides",
+              "calc": "Spreadsheet",
+              "pdf": "PDF",
+              "image": "Image",
+              "video": "Video",
+              "audio": "Audio",
+              "archive": "Archive",
+              "other": "Other"
+            }
+          },
+          "contact": {
+            "label": "Shared with",
+            "placeholder": "Search for a name",
+            "empty": "No contact found",
+            "reset": "Reset"
+          },
+          "modified": {
+            "label": "Modified",
+            "options": {
+              "today": "Today",
+              "last_7_days": "Last 7 days",
+              "last_30_days": "Last 30 days",
+              "this_year": "This year",
+              "more_than_a_year": "More than a year",
+              "custom": "Custom range"
+            },
+            "start": "Start",
+            "end": "End"
+          },
+          "workspace": {
+            "label": "Workspace"
+          },
+          "folders": {
+            "label": "Folders"
+          }
+        },
+        "tree": {
+          "trash": "Trash",
+          "create": {
+            "label": "New",
+            "folder": "New folder",
+            "workspace": "New workspace",
+            "file": {
+              "doc": "New text document",
+              "powerpoint": "New slides",
+              "calc": "New spreadsheet"
+            }
+          },
+          "import": {
+            "label": "Import",
+            "files": "Import files",
+            "folders": "Import folders"
+          },
+          "workspace": {
+            "options": {
+              "info": "Information",
+              "settings_workspace": "Workspace settings",
+              "settings_folder": "Folder settings",
+              "delete_item": "Delete",
+              "delete_workspace": "Delete workspace",
+              "delete_folder": "Delete folder",
+              "delete_file": "Delete file",
+              "share": "Share",
+              "share_view": "View shares"
+            },
+            "move": {
+              "confirmation_modal": {
+                "title": "Transfer rights",
+                "aria_label": "Move confirmation modal",
+                "description": "You are about to move the element <strong>{{sourceItem}}</strong> to the folder <strong>{{targetItem}}</strong>, your document will inherit the share of the target folder.",
+                "description_multiple": "You are about to move <strong>{{count}}</strong> elements to the folder <strong>{{targetItem}}</strong>, your documents will inherit the share of the target folder.",
+                "root_description": "Moved documents will be accessible via your 'My files' tab. People who had access to the documents only through inherited rights from a parent will no longer be able to access them.",
+                "confirm_button": "Move anyway",
+                "cancel_button": "Cancel"
+              }
+            }
+          },
+          "createFolder": "Create",
+          "search": "Search",
+          "personalSpace": "Personal Space",
+          "shared_space": "Shared Space",
+          "public_space": "Public Space",
+          "recent": "Recents",
+          "my_files": "My files",
+          "shared_with_me": "Shared with me",
+          "favorites": "Starred"
+        },
+        "trash": {
+          "title": "Trash",
+          "description": "Automatic deletion after 30 days",
+          "navigate": {
+            "modal_folder": {
+              "title": "This folder is in the trash",
+              "description": "To display this folder, you need to restore it first."
+            },
+            "modal_file": {
+              "title": "This file is in the trash",
+              "description": "To display this file, you need to restore it first."
+            }
+          },
+          "hard_delete": {
+            "title": "Delete forever",
+            "content_one": "Are you sure you want to delete this item forever?",
+            "content_other": "Are you sure you want to delete these {{count}} items forever?",
+            "cancel": "Cancel",
+            "confirm": "Delete forever"
+          }
+        },
+        "search": {
+          "placeholder": "Search for a folder",
+          "results_title": "Search results",
+          "modal": {
+            "title": "Search",
+            "description": "The search function is under development and will be available soon.",
+            "placeholder": "Type a keyword or a file name",
+            "results": "Select a document",
+            "filters": {
+              "reset": "Reset"
+            }
+          }
+        },
+        "selectionBar": {
+          "caption_one": "1 item selected",
+          "caption_other": "{{count}} items selected",
+          "download": "Download",
+          "move": "Move",
+          "delete": "Delete",
+          "reset_selection": "Reset selection"
+        },
+        "folders": {
+          "edit": {
+            "title": "Edit folder",
+            "description": "Edit folder information",
+            "cancel": "Cancel",
+            "submit": "Edit"
+          },
+          "form": {
+            "title": "Folder name",
+            "description": "Description",
+            "cancel": "Cancel",
+            "submit": "Edit"
+          }
+        },
+        "files": {
+          "not_found": {
+            "description": "The file you are looking for does not exist."
+          }
+        },
+        "workspaces": {
+          "mainWorkspace": "My workspace",
+          "form": {
+            "title": "Workspace name",
+            "description": "Description",
+            "settings": "Workspace settings"
+          },
+          "create": {
+            "title": "New workspace",
+            "description": "A workspace allows you to organize your files in a team.",
+            "cancel": "Cancel",
+            "submit": "Create workspace"
+          },
+          "edit": {
+            "title": "Edit workspace",
+            "description": "Edit workspace information",
+            "cancel": "Cancel",
+            "submit": "Edit"
+          }
+        },
+        "actions": {
+          "createFolder": {
+            "modal": {
+              "title": "Create folder",
+              "label": "Folder name",
+              "placeholder": "Enter folder name",
+              "cancel": "Cancel",
+              "submit": "Create"
+            }
+          },
+          "createFile": {
+            "modal": {
+              "title": "Create file",
+              "title_doc": "Create text document",
+              "title_powerpoint": "Create slides",
+              "title_calc": "Create spreadsheet",
+              "label": "File name",
+              "placeholder": "Enter file name",
+              "cancel": "Cancel",
+              "submit": "Create"
+            }
+          },
+          "upload": {
+            "toast": "Drop your files here to transfer them in {{title}}",
+            "toast_no_rights": "You don't have the necessary rights to transfer files in {{title}}",
+            "file_too_large": "The file \"{{name}}\" is too large. Maximum allowed size is {{maxSize}}.",
+            "folders_created": "All folders have been created successfully.",
+            "steps": {
+              "preparing": "Preparing the transfer...",
+              "create_folders": "Creation of folders in progress..."
+            },
+            "files": {
+              "description_one": "{{count}} file being transferred",
+              "description_other": "{{count}} files being transferred",
+              "description_done_one": "{{count}} file transferred",
+              "description_done_other": "{{count}} files transferred",
+              "error": "An error occurred",
+              "error_count_one": "{{count}} file could not be uploaded",
+              "error_count_other": "{{count}} files could not be uploaded",
+              "error_reasons": {
+                "file_size_exceeded": "The file exceeds the maximum allowed size.",
+                "file_type_not_allowed": "This file type is not allowed.",
+                "item_create_file_extension_not_allowed": "This file extension is not allowed.",
+                "file_too_large": "The file exceeds the maximum allowed size.",
+                "user_quota_exceeded": "You can no longer add documents, your personal quota has been reached. Contact your administrator.",
+                "user_override_quota_exceeded": "You can no longer add documents, your personal storage limit has been reached. Contact your administrator.",
+                "organization_quota_exceeded": "You can no longer add documents, your organization quota has been reached. Contact your administrator.",
+                "no_organization": "Your account isn't linked to an organization, so you can't upload files yet. Contact your administrator to get access.",
+                "not_activated": "File upload isn't activated for your organization yet. Contact your administrator to enable it.",
+                "unknown": "An unexpected error occurred."
+              },
+              "error_short": {
+                "file_too_large": "File too large",
+                "user_quota_exceeded": "Quota exceeded",
+                "user_override_quota_exceeded": "Quota exceeded",
+                "organization_quota_exceeded": "Quota exceeded",
+                "no_organization": "Upload not allowed",
+                "not_activated": "Upload not allowed"
+              }
+            },
+            "cancel_modal": {
+              "title": "Leave upload?",
+              "description": "Unfinished files will be lost.",
+              "keep": "Keep uploading",
+              "confirm": "Leave and cancel"
+            }
+          },
+          "delete": {
+            "toast_one": "Item deleted",
+            "toast_other": "{{count}} items deleted",
+            "low_rights_toast": "You don't have the necessary rights to delete these items.",
+            "toast_error_one": "An error occurred while deleting the item.",
+            "toast_error_other": "An error occurred while deleting the items."
+          },
+          "hard_delete": {
+            "toast_one": "Item deleted forever",
+            "toast_other": "{{count}} items deleted forever"
+          },
+          "restore": {
+            "toast_one": "Item restored",
+            "toast_other": "{{count}} items restored"
+          },
+          "move": {
+            "toast_one": "{{count}} item moved",
+            "toast_other": "{{count}} items moved",
+            "toast_error_one": "An error occurred while moving the item.",
+            "toast_error_other": "An error occurred while moving the items."
+          },
+          "share": {
+            "modal": {
+              "title": "Share"
+            }
+          },
+          "rename": {
+            "modal": {
+              "title": "Rename",
+              "label": "New name",
+              "placeholder": "Enter new name",
+              "cancel": "Cancel",
+              "submit": "Rename"
+            }
+          },
+          "convert": {
+            "modal": {
+              "title": "Convert to open this file",
+              "content": "This file needs to be converted before it can be edited. A copy will be created: your original file stays untouched.",
+              "cancel": "Cancel",
+              "confirm": "Convert",
+              "error": "Conversion failed. Please try again.",
+              "analyzing_notice": "This file is still being analyzed for malware. The conversion will start automatically once the analysis is complete."
+            }
+          }
+        },
+        "item": {
+          "actions": {
+            "view_info": "Information",
+            "delete_file": "Delete file",
+            "delete_folder": "Delete folder",
+            "share": "Share",
+            "share_view": "View shares",
+            "move": "Move",
+            "download": "Download",
+            "rename": "Rename",
+            "favorite": "Star",
+            "unfavorite": "Unstar",
+            "duplicate": "Duplicate",
+            "duplicate_error": "An error occurred while duplicating the item.",
+            "delete": "Delete"
+          },
+          "duplicating": "duplication in progress",
+          "converting": "conversion in progress"
+        }
+      },
+      "anonymous_cta": {
+        "try_out": "Try it now",
+        "login": "Sign in"
+      },
+      "my_files_cta": {
+        "my_files": "My files"
+      },
+      "anonymous_dropdown_menu": {
+        "copy_link": "Copy link",
+        "languages": "Languages"
+      },
+      "time": {
+        "years_ago_one": "{{count}} year ago",
+        "years_ago_other": "{{count}} years ago",
+        "months_ago_one": "{{count}} month ago",
+        "months_ago_other": "{{count}} months ago",
+        "weeks_ago_one": "{{count}} week ago",
+        "weeks_ago_other": "{{count}} weeks ago",
+        "days_ago_one": "{{count}} day ago",
+        "days_ago_other": "{{count}} days ago",
+        "hours_ago_one": "{{count}} hour ago",
+        "hours_ago_other": "{{count}} hours ago",
+        "minutes_ago_one": "{{count}} minute ago",
+        "minutes_ago_other": "{{count}} minutes ago",
+        "seconds_ago": "few seconds ago"
+      },
+      "sdk": {
+        "explorer": {
+          "cancel": "Cancel",
+          "choose": "Choose",
+          "picker_caption": "Select one or more files",
+          "picker_label_zero": "No files selected",
+          "picker_label_one": "{{count}} file selected",
+          "picker_label_other": "{{count}} files selected",
+          "save_label": "Choose a destination for the file",
+          "save": "Save",
+          "cannot_pick": "You don't have permission to share this file because you're only a viewer."
+        }
+      },
+      "release_notes": {
+        "labels": {
+          "app_name": "Updates to Drive",
+          "see_whats_new": "See what's new"
+        },
+        "v0_16_0": {
+          "main_title": "What's new",
+          "steps": {
+            "0": {
+              "title": "Customizable columns",
+              "description": "Choose which information to display in your columns: last modified, creation date, author, file type, or size."
+            },
+            "1": {
+              "title": "Sort by column",
+              "description": "Sort your documents by creation date, size, type... Just click the sort button."
+            },
+            "2": {
+              "title": "Duplication",
+              "description": "Duplicate any document in one click."
+            },
+            "3": {
+              "title": "PDF viewer",
+              "description": "Open your PDFs right in Fichiers, with a new built-in viewer."
+            }
+          }
+        },
+        "v0_13_0": {
+          "main_title": "Advanced sharing",
+          "steps": {
+            "0": {
+              "title": "Share folders",
+              "description": "You can now share an entire folder. People you invite also get access to everything inside it. If you already use Fichiers, you can find your previous spaces as shared folders."
+            },
+            "1": {
+              "title": "Advanced roles and access management",
+              "description": "Set roles and access links for your folders and files to make teamwork easier."
+            },
+            "2": {
+              "title": "New \"Move\" window",
+              "description": "Move your files and folders more easily with a new \"Move\" window, including on mobile."
+            }
+          }
+        }
+      },
+      "user_reconciliation": {
+        "title": "User reconciliation",
+        "success": "Your email address has been confirmed. To complete the merge of your accounts, please click the confirmation links sent to all the addresses you provided.",
+        "error": "An error occurred during email validation."
+      }
+    }
+  },
+  "fr-fr": {
+    "translation": {
+      "entitlements": {
+        "can_upload": {
+          "cannot_upload": "Vous n'avez pas les droits nécessaires pour transférer des fichiers."
+        },
+        "disclaimers": {
+          "close": "OK",
+          "cannot_upload": {
+            "title": "Les téléversements ne sont pas disponibles",
+            "user_quota_exceeded": {
+              "description": "Vous ne pouvez plus ajouter de documents, votre quota personnel est atteint. Contactez votre administrateur."
+            },
+            "user_override_quota_exceeded": {
+              "description": "Vous ne pouvez plus ajouter de documents, votre limite de stockage personnelle est atteinte. Contactez votre administrateur."
+            },
+            "organization_quota_exceeded": {
+              "description": "Vous ne pouvez plus ajouter de documents, votre quota d'organisation est atteint. Contactez votre administrateur."
+            },
+            "no_organization": {
+              "description": "Votre compte n'est pas rattaché à une organisation, vous ne pouvez pas encore téléverser de fichiers. Contactez votre administrateur pour obtenir un accès."
+            },
+            "not_activated": {
+              "description": "Le téléversement de fichiers n'est pas encore activé pour votre organisation. Contactez votre administrateur pour l'activer."
+            },
+            "potential_operators": {
+              "description": "Voici la liste des opérateurs potentiels pour vous, inscrivez-vous sur leur site pour obtenir un accès.",
+              "link": "Inscription"
+            }
+          }
+        }
+      },
+      "401": {
+        "title": "Connectez-vous pour accéder aux documents.",
+        "button": "Se connecter"
+      },
+      "403": {
+        "title": "Vous n'avez pas les permissions nécessaires pour accéder à cette page.",
+        "button": "Accueil"
+      },
+      "settings_modal": {
+        "title": "Paramètres",
+        "tabs": {
+          "storage": {
+            "title": "Stockage"
+          }
+        }
+      },
+      "quota": {
+        "gauge": {
+          "exceeded_locked": {
+            "title": "Quota organisation dépassé",
+            "label": "Contactez un administrateur pour augmenter le quota",
+            "reason": {
+              "organization_quota_exceeded": {
+                "description": "Quota org. dépassé"
+              }
+            }
+          },
+          "error": {
+            "title": "Erreur de quota",
+            "label": "Contactez le support pour résoudre l'erreur",
+            "tooltip": "Erreur: {{error}}"
+          }
+        }
+      },
+      "share_modal": {
+        "options": {
+          "link_reach": {
+            "authenticated": "Connecté",
+            "public": "Public",
+            "restricted": "Privé"
+          },
+          "subtext": {
+            "reader": "Peut voir uniquement",
+            "editor": "Peut voir et modifier le contenu",
+            "admin": "Peut gérer les accès",
+            "owner": "Contrôle complet et peut supprimer"
+          },
+          "top_message": {
+            "only_owner": "Vous ne pouvez pas changer votre rôle car vous êtes le seul propriétaire.",
+            "to_lower_role": "Hérité. Pour réduire le rôle ou supprimer l'accès, modifiez le dossier parent.",
+            "inherited_edit": "Hérité. Pour réduire le rôle ou supprimer l'accès, modifiez",
+            "parent_folder": "le dossier parent."
+          }
+        }
+      },
+      "file_download_modal": {
+        "error": {
+          "no_url_or_title": "Ce fichier n'a pas d'URL ou de titre. "
+        },
+        "suspicious": {
+          "title": "Ce fichier est suspect"
+        },
+        "file_too_large_to_analyze": {
+          "title": "Ce fichier est trop volumineux pour être analysé"
+        },
+        "analyzing": {
+          "title": "Ce fichier est en cours d'analyse"
+        },
+        "description": "Êtes-vous sûr de vouloir télécharger ce fichier ?",
+        "download": "Télécharger quand même",
+        "cancel": "Annuler"
+      },
+      "common": {
+        "cancel": "Annuler"
+      },
+      "clipboard": {
+        "success": "Copié dans le presse-papiers",
+        "error": "Échec de la copie dans le presse-papiers"
+      },
+      "app_title": "Fichiers",
+      "app_description": "Gestion de fichiers",
+      "welcome": "Bienvenue",
+      "logout": "Déconnexion",
+      "login": "Connexion",
+      "my_account": "Mon Compte",
+      "api": {
+        "error": {
+          "unexpected": "Une erreur inattendue est survenue."
+        }
+      },
+      "home": {
+        "title": "Stocker et partager facilement",
+        "subtitle": "Un stockage performant et sécurisé pour les équipes publiques françaises. Hébergement en France, sécurité renforcée, et synchronisation fluide avec toutes les applications LaSuite. A la hauteur des meilleurs du marché, sans les compromis de données.",
+        "main_button": "Se connecter",
+        "more": "En savoir plus"
+      },
+      "feedback": {
+        "button": "Faire un retour",
+        "modal": {
+          "title": "Nouveau retour",
+          "description": "Fichiers est en cours de développement : vos retours comptent ! Choisissez comment partager vos idées :",
+          "buttons": {
+            "form": {
+              "title": "Donner un avis rapide",
+              "description": "30 sec pour nous dire ce que vous pensez ou signaler un bug"
+            },
+            "tchap": {
+              "title": "Écrire sur Tchap",
+              "description": "Échange direct avec notre équipe"
+            },
+            "visio": {
+              "title": "Parler en visio",
+              "description": "20 min pour aller en profondeur"
+            }
+          }
+        }
+      },
+      "feedback_widget": {
+        "shortTitle": "Faire un retour",
+        "title": "Partager un retour ou une question",
+        "placeholder": "Saisir votre message...",
+        "email_placeholder": "Renseigner votre email...",
+        "submit_text": "Envoyer le message",
+        "success_text": "Merci pour votre message.",
+        "success_text2": "En cas de questions, nous vous répondrons dans les meilleurs délais sur l'email renseigné."
+      },
+      "authentication": {
+        "error": {
+          "alpha": "Cette application est en version alpha et son accès est restreint.",
+          "user_cannot_access_app": "Vous n'avez pas les permissions nécessaires pour accéder à cette application. Contactez votre administrateur."
+        }
+      },
+      "mime": {
+        "calc": "Tableur",
+        "doc": "Document",
+        "image": "Image",
+        "other": "Autre",
+        "pdf": "PDF",
+        "powerpoint": "Présentation",
+        "audio": "Audio",
+        "video": "Vidéo",
+        "archive": "Archive"
+      },
+      "roles": {
+        "administrator": "Administrateur",
+        "editor": "Éditeur",
+        "reader": "Lecteur",
+        "owner": "Propriétaire"
+      },
+      "explorer": {
+        "breadcrumbs": {
+          "spaces": "Espaces",
+          "all_folders": "Tous les dossiers"
+        },
+        "modal": {
+          "move": {
+            "title": "Déplacer",
+            "move_button": "Déplacer ici",
+            "move_to_root": "Déplacer vers la racine",
+            "aria_label": "Modal de déplacement de dossier",
+            "description_one_item": "Choisissez le nouvel emplacement pour <strong>{{name}}</strong>",
+            "description_multiple_items": "Choisissez le nouvel emplacement pour les <strong>{{count}}</strong> éléments sélectionnés",
+            "errors": {
+              "user_quota_exceeded": "Vous ne pouvez plus déplacer de documents à la racine, votre quota personnel est atteint. Contactez votre administrateur.",
+              "user_override_quota_exceeded": "Vous ne pouvez plus déplacer de documents à la racine, votre limite de stockage personnelle est atteinte. Contactez votre administrateur.",
+              "organization_quota_exceeded": "Vous ne pouvez plus déplacer de documents à la racine, votre quota d'organisation est atteint. Contactez votre administrateur.",
+              "no_organization": "Votre compte n'est pas rattaché à une organisation, vous ne pouvez pas encore déplacer de documents à la racine. Contactez votre administrateur pour obtenir un accès.",
+              "not_activated": "Le téléversement de fichiers n'est pas encore activé pour votre organisation. Vous ne pouvez donc pas déplacer de documents à la racine. Contactez votre administrateur pour l'activer."
+            }
+          }
+        },
+        "drag_overlay": {
+          "files_selected_one": "{{count}} fichier sélectionné",
+          "files_selected_other": "{{count}} fichiers sélectionnés",
+          "cannot_move_file": "Vous n'avez pas les droits pour déplacer ce document",
+          "cannot_move_folder": "Vous n'avez pas les droits pour déplacer ce dossier"
+        },
+        "rightPanel": {
+          "suspicious": {
+            "text": "Ce fichier semble suspect. Il n'est visible que pour vous."
+          },
+          "file_too_large_to_analyze": {
+            "text": "Ce fichier est trop volumineux pour être analysé. Il peut être dangereux de le télécharger."
+          },
+          "multipleSelection": {
+            "text": "Plusieurs fichiers sélectionnés",
+            "alt": "Image de plusieurs fichiers sélectionnés"
+          },
+          "empty": {
+            "text": "Aucun fichier sélectionné",
+            "alt": "Image d'un fichier sélectionné"
+          },
+          "sharing": "Partage",
+          "share": "Partager",
+          "format": "Format",
+          "updated_at": "Modification",
+          "created_at": "Création",
+          "size": "Poids",
+          "created_by": "Créé par",
+          "description": "Description"
+        },
+        "grid": {
+          "name": "Nom",
+          "last_update": "Dernière modification",
+          "columns": {
+            "last_modified": "Dernière modification",
+            "created": "Création",
+            "created_by": "Créé par",
+            "file_type": "Type de fichier",
+            "file_size": "Taille",
+            "folder": "Dossier",
+            "default_suffix": "(par défaut)"
+          },
+          "size_units": {
+            "B": "o",
+            "KB": "ko",
+            "MB": "Mo",
+            "GB": "Go",
+            "TB": "To",
+            "PB": "Po"
+          },
+          "sort": {
+            "ascending": "Tri croissant",
+            "descending": "Tri décroissant",
+            "reset": "Réinitialiser le tri"
+          },
+          "empty": {
+            "default": "Aucun dossier trouvé dans le dossier sélectionné",
+            "caption": {
+              "default": "Cet onglet est vide",
+              "folder": "Ce dossier est vide"
+            },
+            "caption_no_create": "Vous n'avez pas les droits pour ajouter des fichiers",
+            "cta": {
+              "default": "Importez ou créez des fichiers et dossiers ici.",
+              "recent": "Les fichiers et dossiers apparaîtront ici dans l'ordre de leur dernière modification.",
+              "shared_with_me": "Les fichiers et dossiers partagés avec vous apparaîtront ici.",
+              "favorites": "Les fichiers et dossiers favoris apparaîtront ici.",
+              "trash": "Les fichiers et dossiers supprimés apparaîtront ici.",
+              "no_create": "Vous ne pouvez pas ajouter de fichiers ou créer de dossiers car vous n'avez pas les droits nécessaires."
+            }
+          },
+          "no_url": "Cette ressource n'a pas d'URL",
+          "actions": {
+            "button_aria_label": "Plus d'actions pour {{name}}",
+            "info": "Informations",
+            "share": "Partager",
+            "download": "Télécharger",
+            "rename": "Renommer",
+            "move": "Déplacer",
+            "duplicate": "Dupliquer",
+            "delete": "Supprimer",
+            "restore": "Restaurer",
+            "hard_delete": "Supprimer définitivement"
+          }
+        },
+        "filters": {
+          "location": {
+            "label": "Emplacement",
+            "options": {
+              "my_files": "Mes fichiers",
+              "shared_with_me": "Partagés avec moi",
+              "starred": "Favoris",
+              "trashbin": "Corbeille"
+            }
+          },
+          "scopes": {
+            "label": "Emplacement",
+            "options": {
+              "all": "Drive",
+              "trash": "Corbeille"
+            }
+          },
+          "type": {
+            "label": "Type",
+            "options": {
+              "all": "Tous",
+              "file": "Fichier",
+              "folder": "Dossier",
+              "reset": "Réinitialiser"
+            }
+          },
+          "category": {
+            "label": "Type",
+            "options": {
+              "doc": "Document texte",
+              "powerpoint": "Présentation",
+              "calc": "Tableur",
+              "pdf": "PDF",
+              "image": "Image",
+              "video": "Vidéo",
+              "audio": "Audio",
+              "archive": "Archive",
+              "other": "Autre"
+            }
+          },
+          "contact": {
+            "label": "Partagé avec",
+            "placeholder": "Rechercher un nom",
+            "empty": "Aucun contact trouvé",
+            "reset": "Réinitialiser"
+          },
+          "modified": {
+            "label": "Modifié",
+            "options": {
+              "today": "Aujourd'hui",
+              "last_7_days": "7 derniers jours",
+              "last_30_days": "30 derniers jours",
+              "this_year": "Cette année",
+              "more_than_a_year": "Il y a plus d'un an",
+              "custom": "Période personnalisée"
+            },
+            "start": "Début",
+            "end": "Fin"
+          },
+          "workspace": {
+            "label": "Espace"
+          },
+          "folders": {
+            "label": "Dossiers"
+          }
+        },
+        "tree": {
+          "trash": "Corbeille",
+          "createFolder": "Créer",
+          "personalSpace": "Espace personnel",
+          "shared_space": "Espace partagé",
+          "public_space": "Espace public",
+          "search": "Rechercher",
+          "recent": "Récents",
+          "my_files": "Mes fichiers",
+          "shared_with_me": "Partagés avec moi",
+          "favorites": "Favoris",
+          "import": {
+            "label": "Importer",
+            "files": "Importer des fichiers",
+            "folders": "Importer des dossiers"
+          },
+          "create": {
+            "label": "Nouveau",
+            "folder": "Nouveau dossier",
+            "file": {
+              "doc": "Nouveau document texte",
+              "powerpoint": "Nouvelles diapositives",
+              "calc": "Nouveau tableau de calcul"
+            },
+            "workspace": "Nouvel espace"
+          },
+          "workspace": {
+            "options": {
+              "info": "Informations",
+              "settings_workspace": "Paramètre de l'espace",
+              "settings_folder": "Paramètres du dossier",
+              "delete_item": "Supprimer",
+              "delete_workspace": "Supprimer l'espace",
+              "delete_folder": "Supprimer le dossier",
+              "delete_file": "Supprimer le fichier",
+              "share": "Partager",
+              "share_view": "Voir les accès"
+            },
+            "move": {
+              "confirmation_modal": {
+                "title": "Transfert de droits",
+                "aria_label": "Modal de confirmation de déplacement",
+                "description": "Vous êtes sur le point de déplacer l'élément <strong>{{sourceItem}}</strong> vers le dossier <strong>{{targetItem}}</strong>, votre document héritera du partage du dossier cible.",
+                "description_multiple": "Vous êtes sur le point de déplacer <strong>{{count}}</strong> éléments vers le dossier <strong>{{targetItem}}</strong>, vos documents hériteront du partage du dossier cible.",
+                "root_description": "Les documents déplacés seront accéssibles via votre onglet 'Mes fichiers'. Les personnes ayant le droit sur les documents uniquement via un accès hérité d'un parent ne pourront plus y accéder",
+                "confirm_button": "Déplacer quand même",
+                "cancel_button": "Annuler"
+              }
+            }
+          }
+        },
+        "trash": {
+          "title": "Corbeille",
+          "description": "Suppression automatique après 30 jours",
+          "navigate": {
+            "modal_folder": {
+              "title": "Ce dossier est dans la corbeille",
+              "description": "Pour afficher ce dossier, vous devez d'abord le restaurer."
+            },
+            "modal_file": {
+              "title": "Ce fichier est dans la corbeille",
+              "description": "Pour afficher ce fichier, vous devez d'abord le restaurer."
+            }
+          },
+          "hard_delete": {
+            "title": "Supprimer définitivement",
+            "content_one": "Êtes-vous sûr de vouloir supprimer cet élément définitivement?",
+            "content_other": "Êtes-vous sûr de vouloir supprimer ces {{count}} éléments définitivement?",
+            "cancel": "Annuler",
+            "confirm": "Supprimer définitivement"
+          }
+        },
+        "search": {
+          "placeholder": "Rechercher un dossier",
+          "results_title": "Search results",
+          "modal": {
+            "title": "Rechercher",
+            "description": "La fonction de recherche est en cours de développement et sera bientôt disponible.",
+            "placeholder": "Taper un mot clé ou le nom d'un fichier",
+            "results": "Sélectionnez un document",
+            "filters": {
+              "reset": "Réinitialiser"
+            }
+          }
+        },
+        "selectionBar": {
+          "caption_one": "1 élément sélectionné",
+          "caption_other": "{{count}} éléments sélectionnés",
+          "download": "Télécharger",
+          "move": "Déplacer",
+          "delete": "Supprimer",
+          "reset_selection": "Réinitialiser la sélection"
+        },
+        "folders": {
+          "edit": {
+            "title": "Modifier le dossier",
+            "description": "Modifier les informations du dossier",
+            "cancel": "Annuler",
+            "submit": "Mettre à jour"
+          },
+          "form": {
+            "title": "Nom du dossier",
+            "description": "Description",
+            "cancel": "Annuler",
+            "submit": "Mettre à jour"
+          }
+        },
+        "files": {
+          "not_found": {
+            "description": "Le fichier que vous recherchez n'existe pas."
+          }
+        },
+        "workspaces": {
+          "mainWorkspace": "Mon espace",
+          "form": {
+            "title": "Nom du dossier",
+            "description": "Description",
+            "settings": "Paramètres du dossier"
+          },
+          "create": {
+            "title": "Nouvel espace",
+            "description": "Un espace vous permet d'organiser vos fichiers en équipe.",
+            "cancel": "Annuler",
+            "submit": "Créer l'espace"
+          },
+          "edit": {
+            "title": "Renommer le dossier",
+            "description": "Modifier le nom du dossier",
+            "cancel": "Annuler",
+            "submit": "Mettre à jour"
+          }
+        },
+        "actions": {
+          "createFolder": {
+            "modal": {
+              "title": "Créer un dossier",
+              "label": "Nom du dossier",
+              "placeholder": "Entrez le nom du dossier",
+              "cancel": "Annuler",
+              "submit": "Créer"
+            }
+          },
+          "createFile": {
+            "modal": {
+              "title": "Créer un fichier",
+              "title_doc": "Créer un document texte",
+              "title_powerpoint": "Créer des diapositives",
+              "title_calc": "Créer un tableau de calcul",
+              "label": "Nom du fichier",
+              "placeholder": "Entrez le nom du fichier",
+              "cancel": "Annuler",
+              "submit": "Créer"
+            }
+          },
+          "upload": {
+            "toast": "Déposez vos fichiers ici pour les transférer dans {{title}}",
+            "toast_no_rights": "Vous n'avez pas les droits nécessaires pour transférer des fichiers dans {{title}}",
+            "file_too_large": "Le fichier \"{{name}}\" est trop volumineux. La taille maximale autorisée est {{maxSize}}.",
+            "folders_created": "Tous les dossiers ont été créés avec succès.",
+            "steps": {
+              "preparing": "Préparation du transfert...",
+              "create_folders": "Création des dossiers en cours..."
+            },
+            "files": {
+              "description_one": "{{count}} fichier en cours de transfert",
+              "description_other": "{{count}} fichiers en cours de transfert",
+              "description_done_one": "{{count}} fichier transféré",
+              "description_done_other": "{{count}} fichiers transférés",
+              "error": "Une erreur est survenue",
+              "error_count_one": "{{count}} fichier n'a pas pu être transféré",
+              "error_count_other": "{{count}} fichiers n'ont pas pu être transférés",
+              "error_reasons": {
+                "file_size_exceeded": "Le fichier dépasse la taille maximale autorisée.",
+                "file_type_not_allowed": "Ce type de fichier n'est pas autorisé.",
+                "item_create_file_extension_not_allowed": "Cette extension de fichier n'est pas autorisée.",
+                "file_too_large": "Le fichier dépasse la taille maximale autorisée.",
+                "user_quota_exceeded": "Vous ne pouvez plus ajouter de documents, votre quota personnel est atteint. Contactez votre administrateur.",
+                "user_override_quota_exceeded": "Vous ne pouvez plus ajouter de documents, votre limite de stockage personnelle est atteinte. Contactez votre administrateur.",
+                "organization_quota_exceeded": "Vous ne pouvez plus ajouter de documents, votre quota d'organisation est atteint. Contactez votre administrateur.",
+                "no_organization": "Votre compte n'est pas rattaché à une organisation, vous ne pouvez pas encore téléverser de fichiers. Contactez votre administrateur pour obtenir un accès.",
+                "not_activated": "Le téléversement de fichiers n'est pas encore activé pour votre organisation. Contactez votre administrateur pour l'activer.",
+                "unknown": "Une erreur inattendue est survenue."
+              },
+              "error_short": {
+                "file_too_large": "Fichier trop volumineux",
+                "user_quota_exceeded": "Quota atteint",
+                "user_override_quota_exceeded": "Quota atteint",
+                "organization_quota_exceeded": "Quota atteint",
+                "no_organization": "Téléversement non autorisé",
+                "not_activated": "Téléversement non autorisé"
+              }
+            },
+            "cancel_modal": {
+              "title": "Quitter le transfert ?",
+              "description": "Les fichiers non terminés seront perdus.",
+              "keep": "Continuer le transfert",
+              "confirm": "Quitter et annuler"
+            }
+          },
+          "delete": {
+            "toast_one": "Élément supprimé",
+            "toast_other": "{{count}} éléments supprimés",
+            "low_rights_toast": "Vous ne pouvez pas restaurer ces éléments car vous n'avez pas les droits nécessaires.",
+            "toast_error_one": "Une erreur est survenue lors de la suppression de l'élément.",
+            "toast_error_other": "Une erreur est survenue lors de la suppression des éléments."
+          },
+          "hard_delete": {
+            "toast_one": "Élément supprimé définitivement",
+            "toast_other": "{{count}} éléments supprimés définitivement"
+          },
+          "restore": {
+            "toast_one": "Élément restauré",
+            "toast_other": "{{count}} éléments restaurés"
+          },
+          "move": {
+            "toast_one": "{{count}} élément déplacé",
+            "toast_other": "{{count}} éléments déplacés",
+            "toast_error_one": "Une erreur est survenue lors du déplacement de l'élément.",
+            "toast_error_other": "Une erreur est survenue lors du déplacement des éléments."
+          },
+          "share": {
+            "modal": {
+              "title": "Partager"
+            }
+          },
+          "rename": {
+            "modal": {
+              "title": "Renommer",
+              "label": "Nouveau nom",
+              "placeholder": "Entrez le nouveau nom",
+              "cancel": "Annuler",
+              "submit": "Renommer"
+            }
+          },
+          "convert": {
+            "modal": {
+              "title": "Convertir pour ouvrir ce fichier",
+              "content": "Ce fichier nécessite une conversion pour être édité. Une copie sera créée : votre fichier original reste intact.",
+              "cancel": "Annuler",
+              "confirm": "Convertir",
+              "error": "La conversion a échoué. Veuillez réessayer.",
+              "analyzing_notice": "Ce fichier est encore en cours d'analyse antivirus. La conversion démarrera automatiquement une fois l'analyse terminée."
+            }
+          }
+        },
+        "item": {
+          "actions": {
+            "view_info": "Informations",
+            "delete_file": "Supprimer le fichier",
+            "delete_folder": "Supprimer le dossier",
+            "share": "Partager",
+            "share_view": "Voir les accès",
+            "move": "Déplacer",
+            "download": "Télécharger",
+            "rename": "Renommer",
+            "favorite": "Favoris",
+            "unfavorite": "Retirer des favoris",
+            "duplicate": "Dupliquer",
+            "duplicate_error": "Une erreur est survenue lors de la duplication.",
+            "delete": "Supprimer"
+          },
+          "duplicating": "duplication en cours",
+          "converting": "conversion en cours"
+        }
+      },
+      "anonymous_cta": {
+        "try_out": "Essayer maintenant",
+        "login": "Se connecter"
+      },
+      "my_files_cta": {
+        "my_files": "Mes fichiers"
+      },
+      "anonymous_dropdown_menu": {
+        "copy_link": "Copier le lien",
+        "languages": "Langue"
+      },
+      "time": {
+        "years_ago_one": "il y a {{count}} an",
+        "years_ago_other": "il y a {{count}} ans",
+        "months_ago_one": "il y a {{count}} mois",
+        "months_ago_other": "il y a {{count}} mois",
+        "weeks_ago_one": "il y a {{count}} semaine",
+        "weeks_ago_other": "il y a {{count}} semaines",
+        "days_ago_one": "il y a {{count}} jour",
+        "days_ago_other": "il y a {{count}} jours",
+        "hours_ago_one": "il y a {{count}} heure",
+        "hours_ago_other": "il y a {{count}} heures",
+        "minutes_ago_one": "il y a {{count}} minute",
+        "minutes_ago_other": "il y a {{count}} minutes",
+        "seconds_ago": "il y a quelques secondes"
+      },
+      "sdk": {
+        "explorer": {
+          "choose": "Choisir",
+          "cancel": "Annuler",
+          "picker_caption": "Sélectionnez un ou plusieurs fichiers",
+          "picker_label_zero": "Aucun fichier sélectionné",
+          "picker_label_one": "{{count}} fichier sélectionné",
+          "picker_label_other": "{{count}} fichiers sélectionnés",
+          "save_label": "Choisissez une destination pour le fichier",
+          "save": "Enregistrer",
+          "cannot_pick": "Vous n'avez pas les droits pour partager ce fichier car vous n'êtes qu'un lecteur."
+        }
+      },
+      "release_notes": {
+        "labels": {
+          "app_name": "Mise à jour de Fichiers",
+          "see_whats_new": "Voir les nouveautés"
+        },
+        "v0_16_0": {
+          "main_title": "Nouveautés",
+          "steps": {
+            "0": {
+              "title": "Colonnes personnalisables",
+              "description": "Choisissez les informations affichées dans vos colonnes : date de modification, date de création, auteur, type de fichier ou taille."
+            },
+            "1": {
+              "title": "Tri par colonne",
+              "description": "Triez vos documents par date de création, taille, type… Un clic sur le bouton de tri suffit."
+            },
+            "2": {
+              "title": "Duplication",
+              "description": "Dupliquez n'importe quel document en un clic."
+            },
+            "3": {
+              "title": "Lecteur PDF",
+              "description": "Ouvrez vos PDF directement dans Fichiers, grâce à un nouveau lecteur intégré."
+            }
+          }
+        },
+        "v0_13_0": {
+          "main_title": "Partages avancés",
+          "steps": {
+            "0": {
+              "title": "Partager des dossiers",
+              "description": "Vous pouvez désormais partager un dossier entier. Les personnes que vous invitez ont accès à tout ce qu'il contient, selon les rôles que vous leur attribuez. Si vous utilisiez déjà Fichiers, vous retrouverez vos anciens espaces partagés sous forme de dossiers partagés."
+            },
+            "1": {
+              "title": "Gestion avancée des rôles et des accès",
+              "description": "Définissez des rôles et des liens d'accès pour vos dossiers et fichiers afin de faciliter le travail en équipe."
+            },
+            "2": {
+              "title": "Nouvelle fenêtre \"Déplacer\"",
+              "description": "Déplacez vos fichiers et dossiers plus facilement grâce à une nouvelle fenêtre \"Déplacer\", y compris sur mobile."
+            }
+          }
+        }
+      },
+      "user_reconciliation": {
+        "title": "Réconciliation de comptes",
+        "success": "Votre adresse e-mail a été confirmée. Pour finaliser la fusion de vos comptes, cliquez sur les liens de confirmation envoyés à toutes les adresses que vous avez fournies.",
+        "error": "Une erreur s'est produite lors de la validation de l'e-mail."
+      }
+    }
+  },
+  "nl-nl": {
+    "translation": {
+      "entitlements": {
+        "can_upload": {
+          "cannot_upload": "U heeft niet de benodigde rechten om bestanden te uploaden."
+        },
+        "disclaimers": {
+          "close": "OK",
+          "cannot_upload": {
+            "title": "Uploaden is niet beschikbaar",
+            "user_quota_exceeded": {
+              "description": "U kunt geen documenten meer toevoegen, uw persoonlijke quotum is bereikt. Neem contact op met uw beheerder."
+            },
+            "user_override_quota_exceeded": {
+              "description": "U kunt geen documenten meer toevoegen, uw persoonlijke opslaglimiet is bereikt. Neem contact op met uw beheerder."
+            },
+            "organization_quota_exceeded": {
+              "description": "U kunt geen documenten meer toevoegen, het quotum van uw organisatie is bereikt. Neem contact op met uw beheerder."
+            },
+            "no_organization": {
+              "description": "Uw account is niet gekoppeld aan een organisatie, dus u kunt nog geen bestanden uploaden. Neem contact op met uw beheerder voor toegang."
+            },
+            "not_activated": {
+              "description": "Het uploaden van bestanden is nog niet geactiveerd voor uw organisatie. Neem contact op met uw beheerder om dit in te schakelen."
+            },
+            "potential_operators": {
+              "description": "Hier is de lijst van potentiële operators voor u, registreer u op hun website voor toegang.",
+              "link": "Registreren"
+            }
+          }
+        }
+      },
+      "401": {
+        "title": "U moet ingelogd zijn om toegang te krijgen tot de bestanden.",
+        "button": "Login"
+      },
+      "403": {
+        "title": "U beschikt niet over de benodigde rechten om dit bestand te openen.",
+        "button": "Home"
+      },
+      "settings_modal": {
+        "title": "Instellingen",
+        "tabs": {
+          "storage": {
+            "title": "Opslag"
+          }
+        }
+      },
+      "quota": {
+        "gauge": {
+          "exceeded_locked": {
+            "title": "Organisatiequotum overschreden",
+            "label": "Neem contact op met een beheerder om het quotum te verhogen",
+            "reason": {
+              "organization_quota_exceeded": {
+                "description": "Org. quotum overschreden"
+              }
+            }
+          },
+          "error": {
+            "title": "Quotafout",
+            "label": "Neem contact op met de support om de fout op te lossen",
+            "tooltip": "Fout: {{error}}"
+          }
+        }
+      },
+      "share_modal": {
+        "options": {
+          "link_reach": {
+            "authenticated": "Verbonden",
+            "public": "Publiek",
+            "restricted": "Privé"
+          },
+          "subtext": {
+            "reader": "Kan alleen bekijken",
+            "editor": "Kan bekijken en bewerken",
+            "admin": "Kan beheren",
+            "owner": "Volledige controle en kan verwijderen"
+          },
+          "top_message": {
+            "only_owner": "U kunt uw rol niet wijzigen omdat u de enige eigenaar bent.",
+            "to_lower_role": "Herediteerd. Om de rol te verlagen of het toegang te verwijderen, bewerkt u de bovenliggende map.",
+            "inherited_edit": "Herediteerd. Om de rol te verlagen of het toegang te verwijderen, bewerkt u",
+            "parent_folder": "de bovenliggende map."
+          }
+        }
+      },
+      "file_download_modal": {
+        "error": {
+          "no_url_or_title": "Dit bestand heeft geen URL of titel."
+        },
+        "suspicious": {
+          "title": "Dit bestand is verdacht"
+        },
+        "file_too_large_to_analyze": {
+          "title": "Dit bestand is te groot om te worden gescand"
+        },
+        "analyzing": {
+          "title": "Dit bestand wordt nog steeds gescand"
+        },
+        "description": "Weet u zeker dat u dit bestand wilt downloaden?",
+        "download": "Toch downloaden",
+        "cancel": "Annuleren"
+      },
+      "common": {
+        "cancel": "Annuleren"
+      },
+      "clipboard": {
+        "success": "Gekopieërd naar klembord",
+        "error": "Kopiëren naar klembord mislukt"
+      },
+      "app_title": "Drive",
+      "app_description": "Bestandsbeheer",
+      "welcome": "Welkom",
+      "logout": "Uitloggen",
+      "login": "Inloggen",
+      "my_account": "Mijn account",
+      "api": {
+        "error": {
+          "unexpected": "Er is een onverwachte fout opgetreden."
+        }
+      },
+      "home": {
+        "title": "Eenvoudige opslag en delen",
+        "subtitle": "Een modern, hoogwaardig platform voor bestandenopslag ontworpen voor Franse publieke teams. Soevereine hosting in Frankrijk, sterke beveiliging en naadloze synchronisatie met alle LaSuite-apps. Even goed als de beste op de markt — zonder concessies op het gebied van data.",
+        "main_button": "Inloggen",
+        "more": "Meer informatie"
+      },
+      "feedback": {
+        "button": "Geef feedback",
+        "modal": {
+          "title": "Nieuwe feedback",
+          "description": "Drive is in ontwikkeling: uw feedback telt! Kies hoe u uw ideeën wilt delen:",
+          "buttons": {
+            "form": {
+              "title": "Geef snel feedback",
+              "description": "30 seconden om ons te vertellen wat u ervan vindt of een bug te melden"
+            },
+            "tchap": {
+              "title": "Schrijf op Tchap",
+              "description": "Directe uitwisseling met ons team"
+            },
+            "visio": {
+              "title": "Praten op Videogesprek",
+              "description": "20 min voor een diepgaand gesprek"
+            }
+          }
+        }
+      },
+      "feedback_widget": {
+        "shortTitle": "Feedback?",
+        "title": "Heeft u feedback?",
+        "placeholder": "Deel hier uw feedback...",
+        "email_placeholder": "Uw e-mailadres...",
+        "submit_text": "Feedback verzenden",
+        "success_text": "Bedankt voor uw feedback!",
+        "success_text2": "Indien u vragen heeft, nemen wij spoedig contact met u op."
+      },
+      "authentication": {
+        "error": {
+          "alpha": "Deze applicatie bevindt zich in de alfa-fase en de toegang ertoe is beperkt.",
+          "user_cannot_access_app": "U heeft niet de benodigde rechten om toegang te krijgen tot deze applicatie. Neem contact op met uw beheerder."
+        }
+      },
+      "mime": {
+        "calc": "Spreadsheet",
+        "doc": "Document",
+        "image": "Afbeelding",
+        "other": "overige",
+        "pdf": "PDF",
+        "powerpoint": "Presentatie",
+        "audio": "Audio",
+        "video": "Video",
+        "archive": "Archief"
+      },
+      "roles": {
+        "administrator": "Beheerder",
+        "editor": "Redacteur",
+        "reader": "Lezer",
+        "owner": "Eigenaar"
+      },
+      "explorer": {
+        "breadcrumbs": {
+          "spaces": "Werkruimten",
+          "all_folders": "Alle mappen"
+        },
+        "modal": {
+          "move": {
+            "title": "Verplaatsen",
+            "move_button": "Hierheen verplaatsen",
+            "move_to_root": "Verplaats naar root",
+            "aria_label": "Map verplaatsen modal",
+            "description_one_item": "Kies de nieuwe locatie voor <strong>{{name}}</strong>",
+            "description_multiple_items": "Kies de nieuwe locatie voor de <strong>{{count}}</strong> geselecteerde elementen",
+            "errors": {
+              "user_quota_exceeded": "U kunt geen documenten meer naar de root verplaatsen, uw persoonlijke quotum is bereikt. Neem contact op met uw beheerder.",
+              "user_override_quota_exceeded": "U kunt geen documenten meer naar de root verplaatsen, uw persoonlijke opslaglimiet is bereikt. Neem contact op met uw beheerder.",
+              "organization_quota_exceeded": "U kunt geen documenten meer naar de root verplaatsen, het quotum van uw organisatie is bereikt. Neem contact op met uw beheerder.",
+              "no_organization": "Uw account is niet gekoppeld aan een organisatie, dus u kunt nog geen documenten naar de root verplaatsen. Neem contact op met uw beheerder voor toegang.",
+              "not_activated": "Het uploaden van bestanden is nog niet geactiveerd voor uw organisatie, dus u kunt geen documenten naar de root verplaatsen. Neem contact op met uw beheerder om dit in te schakelen."
+            }
+          }
+        },
+        "drag_overlay": {
+          "files_selected_one": "{{count}} bestand geselecteerd",
+          "files_selected_other": "{{count}} bestanden geselecteerd",
+          "cannot_move_file": "U heeft niet de rechten om dit document te verplaatsen",
+          "cannot_move_folder": "U heeft niet de rechten om deze map te verplaatsen"
+        },
+        "rightPanel": {
+          "suspicious": {
+            "text": "Dit bestand ziet er verdacht uit. Het is alleen voor jou zichtbaar."
+          },
+          "file_too_large_to_analyze": {
+            "text": "Dit bestand is te groot om te scannen. Het downloaden ervan is mogelijk onveilig."
+          },
+          "multipleSelection": {
+            "text": "Meerdere bestanden geselecteerd",
+            "alt": "Meerdere bestanden geselecteerd afbeelding"
+          },
+          "empty": {
+            "text": "Geen bestanden geselecteerd",
+            "alt": "Geen bestanden geselecteerd afbeelding"
+          },
+          "sharing": "Delen",
+          "share": "Deel",
+          "format": "Formaat",
+          "updated_at": "Bijgewerkt op",
+          "created_at": "Gecreëerd op",
+          "size": "Grootte",
+          "created_by": "Gecreëerd door",
+          "description": "Beschrijving"
+        },
+        "grid": {
+          "name": "Naam",
+          "last_update": "Laatste update",
+          "columns": {
+            "last_modified": "Laatst gewijzigd",
+            "created": "Aangemaakt",
+            "created_by": "Aangemaakt door",
+            "file_type": "Bestandstype",
+            "file_size": "Bestandsgrootte",
+            "folder": "Map",
+            "default_suffix": "(standaard)"
+          },
+          "size_units": {
+            "B": "B",
+            "KB": "KB",
+            "MB": "MB",
+            "GB": "GB",
+            "TB": "TB",
+            "PB": "PB"
+          },
+          "sort": {
+            "ascending": "Oplopend sorteren",
+            "descending": "Aflopend sorteren",
+            "reset": "Sortering resetten"
+          },
+          "empty": {
+            "default": "Geen map gevonden in de geselecteerde map",
+            "caption": {
+              "default": "Dit tabblad is leeg",
+              "folder": "Deze map is leeg"
+            },
+            "caption_no_create": "U heeft geen toestemming om bestanden toe te voegen",
+            "cta": {
+              "default": "Importeer of maak bestanden en mappen hier aan.",
+              "recent": "Bestanden en mappen verschijnen hier in volgorde van hun laatste wijziging.",
+              "shared_with_me": "Bestanden en mappen die met u zijn gedeeld, verschijnen hier.",
+              "favorites": "Favoriete bestanden en mappen verschijnen hier.",
+              "trash": "Verwijderde bestanden en mappen verschijnen hier.",
+              "no_create": "U kunt geen bestanden toevoegen of mappen aanmaken omdat u niet over de benodigde rechten beschikt."
+            }
+          },
+          "no_url": "Deze bron heeft geen URL",
+          "actions": {
+            "button_aria_label": "Meer acties voor {{name}}",
+            "info": "Info",
+            "share": "Deel",
+            "download": "Download",
+            "rename": "Hernoem",
+            "move": "Verplaats",
+            "duplicate": "Dupliceer",
+            "delete": "Verwijder",
+            "restore": "Herstel",
+            "hard_delete": "Verwijder permanent"
+          }
+        },
+        "filters": {
+          "location": {
+            "label": "Locatie",
+            "options": {
+              "my_files": "Mijn bestanden",
+              "shared_with_me": "Gedeeld met mij",
+              "starred": "Favorieten",
+              "trashbin": "Prullenbak"
+            }
+          },
+          "scopes": {
+            "label": "Locatie",
+            "options": {
+              "all": "Drive",
+              "trash": "Prullenbak"
+            }
+          },
+          "type": {
+            "label": "Type",
+            "options": {
+              "all": "Alles",
+              "file": "Bestanden",
+              "folder": "Map",
+              "reset": "Reset"
+            }
+          },
+          "category": {
+            "label": "Type",
+            "options": {
+              "doc": "Tekstdocument",
+              "powerpoint": "Presentatie",
+              "calc": "Spreadsheet",
+              "pdf": "PDF",
+              "image": "Afbeelding",
+              "video": "Video",
+              "audio": "Audio",
+              "archive": "Archief",
+              "other": "Overig"
+            }
+          },
+          "contact": {
+            "label": "Gedeeld met",
+            "placeholder": "Zoek een naam",
+            "empty": "Geen contacten gevonden",
+            "reset": "Opnieuw instellen"
+          },
+          "modified": {
+            "label": "Gewijzigd",
+            "options": {
+              "today": "Vandaag",
+              "last_7_days": "Laatste 7 dagen",
+              "last_30_days": "Laatste 30 dagen",
+              "this_year": "Dit jaar",
+              "more_than_a_year": "Meer dan een jaar geleden",
+              "custom": "Aangepaste periode"
+            },
+            "start": "Begin",
+            "end": "Einde"
+          },
+          "workspace": {
+            "label": "Werkruimte"
+          },
+          "folders": {
+            "label": "Mappen"
+          }
+        },
+        "tree": {
+          "trash": "Prullenbak",
+          "create": {
+            "label": "Nieuw",
+            "folder": "Nieuwe map",
+            "file": {
+              "doc": "Nieuw tekstdocument",
+              "powerpoint": "Nieuwe presentatie",
+              "calc": "Nieuwe spreadsheet"
+            },
+            "workspace": "Nieuwe werkruimte"
+          },
+          "import": {
+            "label": "Importeer",
+            "files": "Importeer bestanden",
+            "folders": "Importeer mappen"
+          },
+          "workspace": {
+            "options": {
+              "info": "Informatie",
+              "settings_workspace": "Werkruimte instellingen",
+              "settings_folder": "Map instellingen",
+              "delete_item": "Verwijder",
+              "delete_workspace": "Ruimte verwijderen",
+              "delete_folder": "Map verwijderen",
+              "delete_file": "Bestand verwijderen",
+              "share": "Deel",
+              "share_view": "Bekijk delen"
+            },
+            "move": {
+              "confirmation_modal": {
+                "title": "Rechten overdragen",
+                "aria_label": "Verplaatsen bevestigingsmodal",
+                "description": "U staat op het punt het element <strong>{{sourceItem}}</strong> naar de map <strong>{{targetItem}}</strong> te verplaatsen. Uw document zal de rechten van de doelmap overnemen.",
+                "description_multiple": "U staat op het punt om <strong>{{count}}</strong> elementen naar de map <strong>{{targetItem}}</strong> te verplaatsen. Uw documenten zullen de rechten van de doelmap overnemen.",
+                "root_description": "De verplaatste documenten zullen toegankelijk zijn via uw 'Mijn bestanden' tab. Personen die alleen via een erfenisrecht van een bovenliggende map toegang hadden, zullen deze niet meer kunnen bereiken.",
+                "confirm_button": "Verplaats toch",
+                "cancel_button": "Annuleren"
+              }
+            }
+          },
+          "createFolder": "Creëeren",
+          "search": "Zoeken",
+          "personalSpace": "Persoonlijke werkruimte",
+          "shared_space": "Gedeelte werkruimte",
+          "public_space": "Publieke werkruimte",
+          "recent": "Recenten",
+          "my_files": "Mijn bestanden",
+          "shared_with_me": "Gedeeld met mij",
+          "favorites": "Favorieten"
+        },
+        "trash": {
+          "title": "Prullenbak",
+          "description": "Automatisch verwijderen na 30 dagen",
+          "navigate": {
+            "modal_folder": {
+              "title": "Deze map bevindt zich in de prullenbak",
+              "description": "Om deze map weer te geven, moet u deze eerst herstellen."
+            },
+            "modal_file": {
+              "title": "Dit bestand bevindt zich in de prullenbak",
+              "description": "Om dit bestand weer te geven, moet u het eerst herstellen."
+            }
+          },
+          "hard_delete": {
+            "title": "Permanent verwijderen",
+            "content_one": "Weet u zeker dat u dit item definitief wilt verwijderen?",
+            "content_other": "Weet u zeker dat u deze {{count}} items definitief wilt verwijderen?",
+            "cancel": "Annuleren",
+            "confirm": "Verwijder permanent"
+          }
+        },
+        "search": {
+          "placeholder": "Zoek naar een map",
+          "results_title": "Search results",
+          "modal": {
+            "title": "Zoeken",
+            "description": "De zoekfunctie is in ontwikkeling en zal binnenkort beschikbaar zijn.",
+            "placeholder": "Typ een trefwoord of een bestandsnaam",
+            "results": "Selecteer een document",
+            "filters": {
+              "reset": "Herstellen"
+            }
+          }
+        },
+        "selectionBar": {
+          "caption_one": "1 element geselecteerd",
+          "caption_other": "{{count}} elementen geselecteerd",
+          "download": "Download",
+          "move": "Verplaats",
+          "delete": "Verwijder",
+          "reset_selection": "Herstel selectie"
+        },
+        "folders": {
+          "edit": {
+            "title": "Bewerk map",
+            "description": "Bewerk map informatie",
+            "cancel": "Annuleren",
+            "submit": "Bewerk"
+          },
+          "form": {
+            "title": "Map naam",
+            "description": "Beschrijving",
+            "cancel": "Annuleren",
+            "submit": "Bewerk"
+          }
+        },
+        "files": {
+          "not_found": {
+            "description": "Het bestand dat u zoekt bestaat niet."
+          }
+        },
+        "workspaces": {
+          "mainWorkspace": "Mijn Werkruimte",
+          "form": {
+            "title": "Werktuimte naam",
+            "description": "Beschrijving",
+            "settings": "Werkruimte intstellingen"
+          },
+          "create": {
+            "title": "Nieuwe werkruimte",
+            "description": "Met een werkruimte kunt u uw bestanden in een team organiseren.",
+            "cancel": "Annuleren",
+            "submit": "Werkruimte creëren"
+          },
+          "edit": {
+            "title": "Bewerk werkruimte",
+            "description": "Bewerk werkruimte informatie",
+            "cancel": "Annuleren",
+            "submit": "Bewerk"
+          }
+        },
+        "actions": {
+          "createFolder": {
+            "modal": {
+              "title": "Map maken",
+              "label": "Map naam",
+              "placeholder": "Voer mapnaam in",
+              "cancel": "Annuleren",
+              "submit": "Bewerken"
+            }
+          },
+          "createFile": {
+            "modal": {
+              "title": "Bestand maken",
+              "title_doc": "Tekstdocument maken",
+              "title_powerpoint": "Presentatie maken",
+              "title_calc": "Spreadsheet maken",
+              "label": "Bestandsnaam",
+              "placeholder": "Voer bestandsnaam in",
+              "cancel": "Annuleren",
+              "submit": "Maken"
+            }
+          },
+          "upload": {
+            "toast": "Zet uw bestanden hier neer om ze over te zetten in {{title}}",
+            "toast_no_rights": "U beschikt niet over de benodigde rechten om bestanden over te dragen in {{title}}",
+            "file_too_large": "Het bestand \"{{name}}\" is te groot. De maximale toegestane grootte is {{maxSize}}.",
+            "folders_created": "Alle mappen zijn succesvol aangemaakt.",
+            "steps": {
+              "preparing": "Voorbereiding van de overdracht...",
+              "create_folders": "Creatie van mappen in progress..."
+            },
+            "files": {
+              "description_one": "{{count}} bestand wordt verplaatst",
+              "description_other": "{{count}} bestanden wordt verplaatst",
+              "description_done_one": "{{count}} bestand verplaatst",
+              "description_done_other": "{{count}} bestanden verplaatst",
+              "error": "Er is een fout opgetreden",
+              "error_count_one": "{{count}} bestand kon niet worden geüpload",
+              "error_count_other": "{{count}} bestanden konden niet worden geüpload",
+              "error_reasons": {
+                "file_size_exceeded": "Het bestand overschrijdt de maximale toegestane grootte.",
+                "file_type_not_allowed": "Dit bestandstype is niet toegestaan.",
+                "item_create_file_extension_not_allowed": "Deze bestandsextensie is niet toegestaan.",
+                "file_too_large": "Het bestand overschrijdt de maximale toegestane grootte.",
+                "user_quota_exceeded": "U kunt geen documenten meer toevoegen, uw persoonlijke quotum is bereikt. Neem contact op met uw beheerder.",
+                "user_override_quota_exceeded": "U kunt geen documenten meer toevoegen, uw persoonlijke opslaglimiet is bereikt. Neem contact op met uw beheerder.",
+                "organization_quota_exceeded": "U kunt geen documenten meer toevoegen, het quotum van uw organisatie is bereikt. Neem contact op met uw beheerder.",
+                "no_organization": "Uw account is niet gekoppeld aan een organisatie, dus u kunt nog geen bestanden uploaden. Neem contact op met uw beheerder voor toegang.",
+                "not_activated": "Het uploaden van bestanden is nog niet geactiveerd voor uw organisatie. Neem contact op met uw beheerder om dit in te schakelen.",
+                "unknown": "Er is een onverwachte fout opgetreden."
+              },
+              "error_short": {
+                "file_too_large": "Bestand te groot",
+                "user_quota_exceeded": "Quotum bereikt",
+                "user_override_quota_exceeded": "Quotum bereikt",
+                "organization_quota_exceeded": "Quotum bereikt",
+                "no_organization": "Uploaden niet toegestaan",
+                "not_activated": "Uploaden niet toegestaan"
+              }
+            },
+            "cancel_modal": {
+              "title": "Upload verlaten?",
+              "description": "Onvoltooide bestanden gaan verloren.",
+              "keep": "Doorgaan met uploaden",
+              "confirm": "Verlaten en annuleren"
+            }
+          },
+          "delete": {
+            "toast_one": "Item verwijderd",
+            "toast_other": "{{count}} items verwijderd",
+            "low_rights_toast": "U beschikt niet over de benodigde rechten om deze items te verwijderen.",
+            "toast_error_one": "Er is een fout opgetreden bij het verwijderen van het item.",
+            "toast_error_other": "Er is een fout opgetreden bij het verwijderen van de items."
+          },
+          "hard_delete": {
+            "toast_one": "Item permanent verwijderd",
+            "toast_other": "{{count}} items permanent verwijderd"
+          },
+          "restore": {
+            "toast_one": "Item hersteld",
+            "toast_other": "{{count}} items hersteld"
+          },
+          "move": {
+            "toast_one": "{{count}} item verplaatst",
+            "toast_other": "{{count}} items verplaatst",
+            "toast_error_one": "Er is een fout opgetreden bij het verplaatsen van het item.",
+            "toast_error_other": "Er is een fout opgetreden bij het verplaatsen van de items."
+          },
+          "share": {
+            "modal": {
+              "title": "Deel"
+            }
+          },
+          "rename": {
+            "modal": {
+              "title": "Hernoem",
+              "label": "Nieuwe naam",
+              "placeholder": "Voor een nieuwe naam in",
+              "cancel": "Annuleren",
+              "submit": "Hernoem"
+            }
+          },
+          "convert": {
+            "modal": {
+              "title": "Converteren om dit bestand te openen",
+              "content": "Dit bestand moet worden geconverteerd om te kunnen bewerken. Er wordt een kopie gemaakt: uw originele bestand blijft ongewijzigd.",
+              "cancel": "Annuleren",
+              "confirm": "Converteren",
+              "error": "Conversie mislukt. Probeer het opnieuw.",
+              "analyzing_notice": "Dit bestand wordt nog gecontroleerd op malware. De conversie start automatisch zodra de analyse is voltooid."
+            }
+          }
+        },
+        "item": {
+          "actions": {
+            "view_info": "Informatie",
+            "delete_file": "Verwijder bestand",
+            "delete_folder": "Verwijder map",
+            "share": "Deel",
+            "share_view": "Bekijk delen",
+            "move": "Verplaats",
+            "download": "Download",
+            "rename": "Hernoem",
+            "favorite": "Favoriet",
+            "unfavorite": "Verwijder uit favorieten",
+            "duplicate": "Dupliceer",
+            "duplicate_error": "Er is een fout opgetreden bij het dupliceren.",
+            "delete": "Verwijder"
+          },
+          "duplicating": "duplicatie bezig",
+          "converting": "conversie bezig"
+        }
+      },
+      "anonymous_cta": {
+        "try_out": "Probeer het uit",
+        "login": "Inloggen"
+      },
+      "my_files_cta": {
+        "my_files": "Mijn bestanden"
+      },
+      "anonymous_dropdown_menu": {
+        "copy_link": "Kopieer link",
+        "languages": "Talen"
+      },
+      "time": {
+        "years_ago_one": "{{count}} jaar geleden",
+        "years_ago_other": "{{count}} jaren geleden",
+        "months_ago_one": "{{count}} maand geleden",
+        "months_ago_other": "{{count}} maanden geleden",
+        "weeks_ago_one": "{{count}} week geleden",
+        "weeks_ago_other": "{{count}} weken geleden",
+        "days_ago_one": "{{count}} dag geleden",
+        "days_ago_other": "{{count}} dagen geleden",
+        "hours_ago_one": "{{count}} uur geleden",
+        "hours_ago_other": "{{count}} uren geleden",
+        "minutes_ago_one": "{{count}} minuut geleden",
+        "minutes_ago_other": "{{count}} minuten geleden",
+        "seconds_ago": "een paar seconden geleden"
+      },
+      "sdk": {
+        "explorer": {
+          "choose": "Kiezen",
+          "cancel": "Annuleren",
+          "picker_caption": "Selecteer een of meerdere bestanden",
+          "picker_label_zero": "Geen bestanden geselecteerd",
+          "picker_label_one": "{{count}} bestand geselecteerd",
+          "picker_label_other": "{{count}} bestanden geselecteerd",
+          "save_label": "Kies een bestemming voor het bestand",
+          "save": "bewaren",
+          "cannot_pick": "Je hebt geen toestemming om dit bestand te delen omdat je alleen lees-rechten hebt."
+        }
+      },
+      "release_notes": {
+        "labels": {
+          "app_name": "Wat is er nieuw",
+          "see_whats_new": "Zie wat er nieuw is"
+        },
+        "v0_16_0": {
+          "main_title": "Wat is er nieuw",
+          "steps": {
+            "0": {
+              "title": "Aanpasbare kolommen",
+              "description": "Kies welke informatie in uw kolommen wordt weergegeven: laatst gewijzigd, aanmaakdatum, auteur, bestandstype of grootte."
+            },
+            "1": {
+              "title": "Sorteren op kolom",
+              "description": "Sorteer uw documenten op aanmaakdatum, grootte, type... Klik gewoon op de sorteerknop."
+            },
+            "2": {
+              "title": "Duplicatie",
+              "description": "Dupliceer elk document met één klik."
+            },
+            "3": {
+              "title": "PDF-lezer",
+              "description": "Open uw PDF's rechtstreeks in Fichiers, met een nieuwe ingebouwde lezer."
+            }
+          }
+        },
+        "v0_13_0": {
+          "main_title": "Wat is er nieuw",
+          "steps": {
+            "0": {
+              "title": "Mappen delen",
+              "description": "U kunt nu een hele map delen. Mensen die u uitnodigt krijgen ook toegang tot alles wat erin zit. Als u Fichiers al gebruikt, kunt u uw vorige werkruimten terugvinden als gedeelde mappen."
+            },
+            "1": {
+              "title": "Geavanceerd rollen- en toegangsbeheer",
+              "description": "Stel rollen en toegangslinks in voor uw mappen en bestanden om samenwerking te vergemakkelijken."
+            },
+            "2": {
+              "title": "Nieuw \"Verplaatsen\" venster",
+              "description": "Verplaats uw bestanden en mappen gemakkelijker met een nieuw \"Verplaatsen\" venster, ook op mobiel."
+            }
+          }
+        }
+      },
+      "user_reconciliation": {
+        "title": "Accountreconciliatie",
+        "success": "Uw e-mailadres is bevestigd. Klik op de bevestigingslinks die naar alle door u opgegeven adressen zijn verzonden om het samenvoegen van uw accounts te voltooien.",
+        "error": "Er is een fout opgetreden tijdens de e-mailvalidatie."
+      }
+    }
+  }
+}

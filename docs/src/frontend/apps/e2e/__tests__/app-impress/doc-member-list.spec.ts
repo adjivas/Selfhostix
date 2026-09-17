@@ -1,0 +1,250 @@
+import { expect, test } from '@playwright/test';
+
+import {
+  clickInEditorShareButton,
+  createDoc,
+  verifyDocName,
+} from './utils-common';
+import { addNewMember } from './utils-share';
+
+test.beforeEach(async ({ page }) => {
+  await page.goto('/');
+});
+
+test.describe('Document list members', () => {
+  test('it checks a big list of members', async ({ page, browserName }) => {
+    const [docTitle] = await createDoc(
+      page,
+      'members-big-members-list',
+      browserName,
+      1,
+    );
+
+    await verifyDocName(page, docTitle);
+
+    // Get the current URL and extract the last part
+    const currentUrl = page.url();
+
+    const currentDocId = (() => {
+      // Remove trailing slash if present
+      const cleanUrl = currentUrl.endsWith('/')
+        ? currentUrl.slice(0, -1)
+        : currentUrl;
+
+      // Split by '/' and get the last part
+      return cleanUrl.split('/').pop() || '';
+    })();
+
+    await page.route(/.*\/documents\/.*\/accesses\//, async (route) => {
+      const request = route.request();
+      const url = new URL(request.url());
+      const pageId = url.searchParams.get('page') ?? '1';
+
+      const accesses = Array.from({ length: 20 }, (_, i) => ({
+        id: `2ff1ec07-86c1-4534-a643-f41824a6c53a-${pageId}-${i}`,
+        document: {
+          id: currentDocId,
+          name: `Doc ${pageId}-${i}`,
+          path: `0000.${pageId}-${i}`,
+        },
+        user: {
+          id: `fc092149-cafa-4ffa-a29d-e4b18af751-${pageId}-${i}`,
+          email: `impress@impress.world-page-${pageId}-${i}`,
+          full_name: `Impress World Page ${pageId}-${i}`,
+        },
+        team: '',
+        role: 'editor',
+        max_ancestors_role: null,
+        max_role: 'editor',
+        abilities: {
+          destroy: false,
+          partial_update: true,
+          set_role_to: ['administrator', 'editor'],
+        },
+      }));
+
+      if (request.method().includes('GET')) {
+        await route.fulfill({
+          json: accesses,
+        });
+      } else {
+        await route.continue();
+      }
+    });
+
+    await page.getByRole('button', { name: 'Share' }).click();
+
+    const prefix = 'doc-share-member-row';
+    const elements = page.locator(`[data-testid^="${prefix}"]`);
+    const loadMore = page.getByTestId('load-more-members');
+
+    await expect(elements).toHaveCount(20);
+
+    await expect(loadMore).toBeHidden();
+  });
+
+  test('it checks a big list of invitations', async ({ page, browserName }) => {
+    await page.route(
+      /.*\/documents\/.*\/invitations\/\?page=.*/,
+      async (route) => {
+        const request = route.request();
+        const url = new URL(request.url());
+        const pageId = url.searchParams.get('page') ?? '1';
+        const accesses = {
+          count: 40,
+          next: +pageId < 2 ? 'http://anything/?page=2' : null,
+          previous: null,
+          results: Array.from({ length: 20 }, (_, i) => ({
+            id: `2ff1ec07-86c1-4534-a643-f41824a6c53a-${pageId}-${i}`,
+            email: `impress@impress.world-page-${pageId}-${i}`,
+            team: '',
+            role: 'editor',
+            abilities: {
+              destroy: true,
+              update: true,
+              partial_update: true,
+              retrieve: true,
+            },
+          })),
+        };
+
+        if (request.method().includes('GET')) {
+          await route.fulfill({
+            json: accesses,
+          });
+        } else {
+          await route.continue();
+        }
+      },
+    );
+
+    await createDoc(page, 'members-big-invitation-list', browserName, 1);
+    await clickInEditorShareButton(page);
+
+    const prefix = 'doc-share-invitation';
+    const elements = page.locator(`[data-testid^="${prefix}"]`);
+    const loadMore = page.getByTestId('load-more-invitations');
+
+    await expect(elements).toHaveCount(20);
+    await expect(
+      page.getByText(`impress@impress.world-page-1-16`).first(),
+    ).toBeVisible();
+
+    await loadMore.click();
+    await expect(elements).toHaveCount(40);
+    await expect(
+      page.getByText(`impress@impress.world-page-2-16`).first(),
+    ).toBeVisible();
+
+    await expect(loadMore).toBeHidden();
+  });
+
+  test('it checks the role rules', async ({ page, browserName }) => {
+    await createDoc(page, 'Doc role rules', browserName, 1);
+
+    await clickInEditorShareButton(page);
+
+    const list = page.getByTestId('doc-share-quick-search');
+    await expect(list).toBeVisible();
+    const emailRequest =
+      process.env[`SIGN_IN_USERNAME_${browserName.toUpperCase()}`] || '';
+    const currentUser = list.getByTestId(
+      `doc-share-member-row-${emailRequest}`,
+    );
+    const currentUserRole = currentUser.getByTestId('doc-role-dropdown');
+    await expect(currentUser).toBeVisible();
+    await expect(currentUserRole).toBeVisible();
+    await currentUserRole.click();
+    const soloOwner = page.getByText(
+      `You are the sole owner of this group, make another member the group owner before you can change your own role or be removed from your document.`,
+    );
+    await expect(soloOwner).toBeVisible();
+    await expect(
+      page.getByRole('menuitemradio', { name: 'Administrator' }),
+    ).toBeDisabled();
+
+    await list.click({
+      force: true, // Force click to close the dropdown
+    });
+    const newUserEmail = await addNewMember(page, 0, 'Owner');
+    const newUser = list.getByTestId(`doc-share-member-row-${newUserEmail}`);
+    const newUserRoles = newUser.getByTestId('doc-role-dropdown');
+
+    await expect(newUser).toBeVisible();
+
+    await currentUserRole.click();
+    await expect(soloOwner).toBeHidden();
+    await list.click({
+      force: true, // Force click to close the dropdown
+    });
+
+    await newUserRoles.click();
+    await list.click({
+      force: true, // Force click to close the dropdown
+    });
+
+    await currentUserRole.click();
+    await page.getByRole('menuitemradio', { name: 'Administrator' }).click();
+    await list.click();
+    await expect(currentUserRole).toBeVisible();
+
+    await page.waitForTimeout(300);
+
+    await newUserRoles.click();
+    await expect(
+      page.getByRole('menuitemradio', { name: 'Owner' }),
+    ).toBeDisabled();
+    await list.click({
+      force: true, // Force click to close the dropdown
+    });
+
+    await currentUserRole.click();
+    await page.getByRole('menuitemradio', { name: 'Reader' }).click();
+    await list.click({
+      force: true, // Force click to close the dropdown
+    });
+    await expect(currentUserRole).toBeHidden();
+  });
+
+  test('it checks the delete members', async ({ page, browserName }) => {
+    await createDoc(page, 'Doc role rules', browserName, 1);
+
+    await clickInEditorShareButton(page);
+
+    const list = page.getByTestId('doc-share-quick-search');
+
+    const emailRequest =
+      process.env[`SIGN_IN_USERNAME_${browserName.toUpperCase()}`] || '';
+    const mySelf = list.getByTestId(`doc-share-member-row-${emailRequest}`);
+    const mySelfRole = mySelf.getByTestId('doc-role-dropdown');
+
+    const userOwnerEmail = await addNewMember(page, 0, 'Owner');
+    const userOwner = list.getByTestId(
+      `doc-share-member-row-${userOwnerEmail}`,
+    );
+
+    await page.getByRole('button', { name: 'close' }).first().click();
+    await clickInEditorShareButton(page);
+
+    const userReaderEmail = await addNewMember(page, 0, 'Reader');
+
+    const userReader = list.getByTestId(
+      `doc-share-member-row-${userReaderEmail}`,
+    );
+    const userReaderRole = userReader.getByTestId('doc-role-dropdown');
+
+    await expect(mySelf).toBeVisible();
+    await expect(userOwner).toBeVisible();
+    await expect(userReader).toBeVisible();
+
+    await userReaderRole.click();
+    await page.getByRole('menuitemradio', { name: 'Remove access' }).click();
+    await expect(userReader).toBeHidden();
+
+    await mySelfRole.click();
+    await page.getByRole('menuitemradio', { name: 'Remove access' }).click();
+    await expect(
+      page.getByText('Insufficient access rights to view the document.'),
+    ).toBeVisible();
+  });
+});

@@ -1,0 +1,54 @@
+name: Move unlabelled from needs info columns to triaged
+
+on:
+    issues:
+        types: [unlabeled]
+permissions: {}
+jobs:
+    move_no_longer_needs_info_issues:
+        name: Move no longer X-Needs-Info issues to Triaged
+        runs-on: ubuntu-24.04
+        if: >
+            !contains(github.event.issue.labels.*.name, 'X-Needs-Info')
+        steps:
+            - id: set_fields
+              uses: nipe0324/update-project-v2-item-field@c4af58452d1c5a788c1ea4f20e073fa722ec4a6b #v2.0.2
+              with:
+                  project-url: ${{ env.PROJECT_URL }}
+                  github-token: ${{ secrets.ELEMENT_BOT_TOKEN }}
+                  skip-update-script: |
+                      const isIssue = item.type === 'ISSUE'
+                      const status = item.fieldValues['Status']
+                      return !isIssue || status !== 'Needs info'
+                  field-name: Status
+                  field-value: "Triaged"
+        env:
+            PROJECT_URL: https://github.com/orgs/element-hq/projects/120
+
+    remove_Z-Labs_label:
+        name: Remove Z-Labs label when features behind labs flags are removed
+        runs-on: ubuntu-24.04
+        if: >
+            !(contains(github.event.issue.labels.*.name, 'A-Maths') ||
+            contains(github.event.issue.labels.*.name, 'A-Message-Pinning') ||
+            contains(github.event.issue.labels.*.name, 'A-Location-Sharing') ||
+            contains(github.event.issue.labels.*.name, 'Z-IA') ||
+            contains(github.event.issue.labels.*.name, 'A-Jump-To-Date') ||
+            contains(github.event.issue.labels.*.name, 'A-Themes-Custom') ||
+            contains(github.event.issue.labels.*.name, 'A-E2EE-Dehydration') ||
+            contains(github.event.issue.labels.*.name, 'A-Tags') ||
+            contains(github.event.issue.labels.*.name, 'A-Video-Rooms') ||
+            contains(github.event.issue.labels.*.name, 'A-Message-Starring') ||
+            contains(github.event.issue.labels.*.name, 'A-Rich-Text-Editor') ||
+            contains(github.event.issue.labels.*.name, 'A-Element-Call')) &&
+            contains(github.event.issue.labels.*.name, 'Z-Labs')
+        steps:
+            - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+              with:
+                  script: |
+                      github.rest.issues.removeLabel({
+                        issue_number: context.issue.number,
+                        owner: context.repo.owner,
+                        repo: context.repo.repo,
+                        name: ['Z-Labs']
+                      })

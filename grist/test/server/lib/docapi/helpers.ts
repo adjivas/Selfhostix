@@ -1,0 +1,400 @@
+/**
+ * Shared test scenarios for DocApi tests.
+ *
+ * Provides setup functions for running tests against different server configurations:
+ * - Merged server: single server for home + docs
+ * - Separated servers: home server + doc worker (requires Redis)
+ * - Direct to docworker: requests sent directly to doc worker (requires Redis)
+ */
+
+import { StringUnion } from "app/common/StringUnion";
+import { UserAPI, UserAPIImpl } from "app/common/UserAPI";
+import { configForUser } from "test/gen-server/testUtils";
+import { getExtraScenarios } from "test/server/lib/docapi/extraScenarios";
+import {
+  ExtraServerModes,
+  getExtraServerModeInitializer,
+} from "test/server/lib/docapi/extraServerModes";
+import { prepareDatabase } from "test/server/lib/helpers/PrepareDatabase";
+import { TestServer } from "test/server/lib/helpers/TestServer";
+import * as testUtils from "test/server/testUtils";
+
+import * as path from "path";
+
+import axios, { AxiosRequestConfig } from "axios";
+import { assert } from "chai";
+import * as fse from "fs-extra";
+import fetch from "node-fetch";
+import { createClient } from "redis";
+
+/**
+ * Context provided to tests - contains everything needed to run API tests.
+ */
+export interface TestContext {
+  /** URL for API requests (may be home or docs server depending on scenario) */
+  serverUrl: string;
+  /** URL for home server */
+  homeUrl: string;
+  /** User API client */
+  userApi: UserAPI;
+  /** Create a new testing document, or get it if already created **/
+  getOrCreateTestDoc: (workspace?: string) => Promise<string>;
+  /** Document IDs for fixture documents */
+  docIds: { [name: string]: string };
+  /** Axios config for Chimpy user */
+  chimpy: AxiosRequestConfig;
+  /** Axios config for Kiwi user */
+  kiwi: AxiosRequestConfig;
+  /** Axios config for Charon user */
+  charon: AxiosRequestConfig;
+  /** Axios config for anonymous user */
+  nobody: AxiosRequestConfig;
+  /** Axios config for support user */
+  support: AxiosRequestConfig;
+  /** Whether home API is available (false when direct to docworker) */
+  hasHomeApi: boolean;
+  /** Home server instance */
+  home: TestServer;
+  /** Docs server instance (same as home for merged) */
+  docs: TestServer;
+  /** The scenario the harness selected for this context. Lets tests skip when
+   * they only make sense under a specific topology (e.g. the fleet canary). */
+  mode: ServerMode;
+  /** Flush auth cache after permission changes */
+  flushAuth: () => Promise<void>;
+  /** Cleanup function - call in after() */
+  cleanup: () => Promise<void>;
+}
+
+/** Server configuration mode */
+export const CoreServerMode = StringUnion("merged", "separated", "direct");
+export type CoreServerMode = typeof CoreServerMode.type;
+// ExtraServerModes is `never` in core; other editions widen it.
+// eslint-disable-next-line @typescript-eslint/no-redundant-type-constituents
+export type ServerMode = CoreServerMode | ExtraServerModes;
+
+// Module-level state for each test run
+let tmpDir: string;
+let dataDir: string;
+// Track which test suites have been set up (keyed by testSuiteName)
+const globalSetupDone = new Set<string>();
+
+// Pre-seeded document IDs from the test database
+const docIds: { [name: string]: string } = {
+  ApiDataRecordsTest: "sampledocid_7",
+  Timesheets: "sampledocid_13",
+  Bananas: "sampledocid_6",
+};
+
+// Org name from the seeded database
+export const ORG_NAME = "docs-1";
+
+/**
+ * Flush Redis database if Redis is in use.
+ */
+async function flushAllRedis() {
+  if (process.env.TEST_REDIS_URL) {
+    const cli = createClient(process.env.TEST_REDIS_URL);
+    await cli.flushdbAsync();
+    await cli.quitAsync();
+  }
+}
+
+/**
+ * Create a UserAPI instance for the given org and request config, as fetched by configForUser
+ */
+export function makeUserApi(homeUrl: string, org: string, config: AxiosRequestConfig): UserAPI {
+  return new UserAPIImpl(`${homeUrl}/o/${org}`, {
+    headers: config.headers as Record<string, string>,
+    fetch: fetch as unknown as typeof globalThis.fetch,
+  });
+}
+
+/**
+ * Set up fixture documents in the data directory.
+ */
+async function setupDataDir(dir: string) {
+  await testUtils.copyFixtureDoc("Hello.grist", path.resolve(dir, docIds.Timesheets + ".grist"));
+  await testUtils.copyFixtureDoc("Hello.grist", path.resolve(dir, docIds.Bananas + ".grist"));
+  await testUtils.copyFixtureDoc(
+    "ApiDataRecordsTest.grist",
+    path.resolve(dir, docIds.ApiDataRecordsTest + ".grist"),
+  );
+}
+
+/**
+ * Get workspace ID by name.
+ */
+async function getWorkspaceId(api: UserAPI, name: string): Promise<number | undefined> {
+  const workspaces = await api.getOrgWorkspaces("current");
+  return workspaces.find(w => w.name === name)?.id;
+}
+
+/**
+ * Global setup that runs once before any scenario.
+ * Sets up the temp directory and seeded database.
+ */
+async function globalSetup(testSuiteName: string, env: testUtils.EnvironmentSnapshot) {
+  if (globalSetupDone.has(testSuiteName)) {
+    return;
+  }
+  globalSetupDone.add(testSuiteName);
+
+  // Create a stable temp directory (like DocApi.ts)
+  tmpDir = await testUtils.createTestDir(testSuiteName);
+
+  // Create the seeded database
+  await prepareDatabase(tmpDir, env);
+}
+
+/**
+ * Per-scenario setup. Sets up data directory and fixtures.
+ */
+async function scenarioSetup(suitename: string): Promise<{ docIds: { [name: string]: string } }> {
+  await flushAllRedis();
+
+  // Create data directory with fixtures
+  dataDir = path.join(tmpDir, `${suitename}-data`);
+  await fse.mkdirs(dataDir);
+  await setupDataDir(dataDir);
+
+  return { docIds: { ...docIds } };
+}
+
+/**
+ * Create the TestContext with user configs and helpers.
+ */
+function createContext(
+  home: TestServer,
+  docs: TestServer,
+  serverUrl: string,
+  homeUrl: string,
+  scenarioDocIds: { [name: string]: string },
+  hasHomeApi: boolean,
+  mode: ServerMode,
+): TestContext {
+  const userApi = makeUserApi(homeUrl, ORG_NAME, configForUser("chimpy"));
+
+  const flushAuth = async () => {
+    await home.testingHooks.flushAuthorizerCache();
+    if (docs !== home) {
+      await docs.testingHooks.flushAuthorizerCache();
+    }
+  };
+
+  const getOrCreateTestDoc = async (workspace: string = "Private") => {
+    if (scenarioDocIds.TestDoc) {
+      return scenarioDocIds.TestDoc;
+    }
+    // Create TestDoc as an empty doc in Private workspace
+    const privateWorkspaceId = await getWorkspaceId(userApi, workspace);
+    scenarioDocIds.TestDoc = await userApi.newDoc({ name: "TestDoc" }, privateWorkspaceId!);
+    return scenarioDocIds.TestDoc;
+  };
+
+  const cleanup = async () => {
+    // Delete TestDoc if it was created
+    if (scenarioDocIds.TestDoc) {
+      await userApi.deleteDoc(scenarioDocIds.TestDoc);
+      delete scenarioDocIds.TestDoc;
+    }
+    await home.stop();
+    if (docs !== home) {
+      await docs.stop();
+    }
+  };
+
+  return {
+    serverUrl,
+    homeUrl,
+    userApi,
+    getOrCreateTestDoc,
+    docIds: scenarioDocIds,
+    chimpy: configForUser("Chimpy"),
+    kiwi: configForUser("Kiwi"),
+    charon: configForUser("Charon"),
+    nobody: configForUser("Anonymous"),
+    support: configForUser("Support"),
+    hasHomeApi,
+    home,
+    docs,
+    mode,
+    flushAuth,
+    cleanup,
+  };
+}
+
+export interface ITestServerModeOptions {
+  tmpDir: string;
+  env: Record<string, string>;
+}
+
+export interface ITestServerSetupResult {
+  home: TestServer;
+  docs: TestServer;
+  serverUrl: string;
+}
+
+export type TestServerInitializer = (options: ITestServerModeOptions) => Promise<ITestServerSetupResult>;
+
+const serverModeInitializers: Record<CoreServerMode, TestServerInitializer> = {
+  merged: async ({ tmpDir, env }) => {
+    const mergedServer = await TestServer.startServer("home,docs", tmpDir, "merged", env);
+    return {
+      home: mergedServer,
+      docs: mergedServer,
+      serverUrl: mergedServer.serverUrl,
+    };
+  },
+  separated: async ({ tmpDir, env }) => {
+    const home = await TestServer.startServer("home", tmpDir, "separated", env);
+    const docs = await TestServer.startServer("docs", tmpDir, "separated", env, home.serverUrl);
+    return {
+      home,
+      docs,
+      serverUrl: home.serverUrl,
+    };
+  },
+  direct: async ({ tmpDir, env }) => {
+    const home = await TestServer.startServer("home", tmpDir, "direct", env);
+    const docs = await TestServer.startServer("docs", tmpDir, "direct", env, home.serverUrl);
+    return {
+      home,
+      docs,
+      serverUrl: docs.serverUrl,
+    };
+  },
+};
+
+/**
+ * Set up servers for a given mode.
+ *
+ * @param mode - "merged" (single server), "separated" (home + docworker), or "direct" (to docworker)
+ * @param extraEnv - Additional environment variables
+ */
+export async function setupServers(
+  mode: ServerMode,
+  extraEnv?: Record<string, string>,
+): Promise<TestContext> {
+  const { docIds: scenarioDocIds } = await scenarioSetup(mode);
+
+  const env = {
+    GRIST_DATA_DIR: dataDir,
+    GRIST_EXTERNAL_ATTACHMENTS_MODE: "test",
+    // The XLS test fails on Jenkins without this. Mysterious? Maybe a real problem or
+    // a problem in test setup related to plugins? TODO: investigate and fix.
+    GRIST_SANDBOX_FLAVOR: "unsandboxed",
+    ...extraEnv,
+  };
+
+  let serverModeInitializer = getExtraServerModeInitializer(mode);
+
+  if (!serverModeInitializer && CoreServerMode.guard(mode)) {
+    serverModeInitializer = serverModeInitializers[mode];
+  }
+
+  // Shouldn't ever happen, but theoretically possible, so ensure this case is covered.
+  if (!serverModeInitializer) {
+    throw new Error(`Invalid server mode '${mode}'`);
+  }
+
+  const { home, docs, serverUrl } = await serverModeInitializer({ tmpDir, env });
+
+  return createContext(home, docs, serverUrl, home.serverUrl, scenarioDocIds, mode !== "direct", mode);
+}
+
+/**
+ * Options for scenario configuration.
+ */
+export interface ScenarioOptions {
+  /** Additional environment variables to pass to the server */
+  extraEnv?: Record<string, string>;
+}
+
+/**
+ * Add a single test scenario as a describe block.
+ */
+function addScenario(
+  name: string,
+  mode: ServerMode,
+  addTests: (getCtx: () => TestContext) => void,
+  options: ScenarioOptions = {},
+) {
+  describe(name, function() {
+    let ctx: TestContext;
+
+    before(async function() {
+      ctx = await setupServers(mode, options.extraEnv);
+    });
+
+    after(async function() {
+      await ctx.cleanup();
+    });
+
+    addTests(() => ctx);
+  });
+}
+
+export interface ScenarioDefinition {
+  name: string;
+  mode: ServerMode;
+  options?: ScenarioOptions
+}
+
+/**
+ * Add all test scenarios to the current describe block.
+ *
+ * This creates nested describe blocks for each server configuration:
+ * - "merged server" - always runs
+ * - "home + docworker" - runs if Redis available
+ * - "direct to docworker" - runs if Redis available
+ *
+ * @param addTests Function that adds it() blocks, receives context getter
+ * @param testSuiteName Optional name for the test suite (used for temp directory)
+ * @param options Optional configuration (extraEnv, etc.)
+ */
+export function addAllScenarios(
+  addTests: (getCtx: () => TestContext) => void,
+  testSuiteName: string = "docapi",
+  options: ScenarioOptions = {},
+) {
+  let oldEnv: testUtils.EnvironmentSnapshot;
+
+  // Global setup runs once before any scenario
+  before(async function() {
+    oldEnv = new testUtils.EnvironmentSnapshot();
+    await globalSetup(testSuiteName, oldEnv);
+  });
+
+  after(async function() {
+    oldEnv.restore();
+    globalSetupDone.delete(testSuiteName);
+  });
+
+  addScenario("merged server", "merged", addTests, options);
+
+  if (process.env.TEST_REDIS_URL) {
+    addScenario("home + docworker", "separated", addTests, options);
+    addScenario("direct to docworker", "direct", addTests, options);
+  }
+
+  // Add any scenarios specific to other Grist versions.
+  for (const scenario of getExtraScenarios(options)) {
+    addScenario(scenario.name, scenario.mode, addTests, scenario.options);
+  }
+}
+
+export async function addAttachmentsToDoc(
+  serverUrl: string,
+  docId: string,
+  attachments: { name: string; contents: string }[],
+  config: AxiosRequestConfig,
+) {
+  const formData = new FormData();
+  for (const attachment of attachments) {
+    formData.append("upload", new File([attachment.contents], attachment.name));
+  }
+  const resp = await axios.post(`${serverUrl}/api/docs/${docId}/attachments`, formData, config);
+  assert.equal(resp.status, 200);
+  return resp;
+}

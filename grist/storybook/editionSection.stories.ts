@@ -1,0 +1,114 @@
+import { Notifier } from "app/client/models/NotifyModel";
+import { EditionSection, editionSwitchWarning } from "app/client/ui/EditionSection";
+import { confirmModal } from "app/client/ui2018/modals";
+import { COMMUNITY_EDITION, FULL_EDITION } from "app/common/gristUrls";
+
+import { Disposable, DomContents, styled } from "grainjs";
+
+export default {
+  title: "Admin panel/EditionSection",
+  parameters: {
+    docs: { codePanel: true, source: { type: "code" } },
+  },
+};
+
+// --- Helpers ----------------------------------------------------------------
+
+// ToggleEnterpriseWidget reads `deploymentType` and `activation` straight
+// from window.gristConfig, so stories need to swap it to drive the widget
+// into specific visual states.
+function withGristConfig(owner: Disposable, config: Record<string, unknown>) {
+  const prev = (window as any).gristConfig;
+  (window as any).gristConfig = { ...prev, ...config };
+  owner.onDispose(() => { (window as any).gristConfig = prev; });
+}
+
+type EditionSectionOverrides =
+  NonNullable<Parameters<typeof EditionSection.create>[1]>["overrides"];
+
+interface AdminStoryArgs {
+  deploymentType?: "core" | "enterprise";
+  overrides: EditionSectionOverrides;
+  build?: (section: EditionSection) => DomContents;
+}
+
+function adminStory({ deploymentType, overrides, build }: AdminStoryArgs) {
+  return {
+    render: (_args: any, { owner }: any) => {
+      if (deploymentType) { withGristConfig(owner, { deploymentType }); }
+      const section = EditionSection.create(owner, {
+        inAdminPanel: true,
+        notifier: Notifier.create(owner),
+        onEditionSwitch: edition => confirmModal(
+          edition === FULL_EDITION ? "Switch to full Grist?" : "Switch to Community edition?",
+          "Restart",
+          () => section.selectEdition(edition),
+          { explanation: editionSwitchWarning(edition) },
+        ),
+        overrides,
+      });
+      return cssFrame((build ?? (s => s.buildDom()))(section));
+    },
+  };
+}
+
+function wizardStory(overrides: EditionSectionOverrides) {
+  return {
+    render: (_args: any, { owner }: any) =>
+      cssFrame(EditionSection.create(owner, { overrides }).buildWizardDom()),
+  };
+}
+
+function statusStory(args: AdminStoryArgs) {
+  return adminStory({ ...args, build: s => s.buildStatusDisplay() });
+}
+
+// --- Admin-panel mode stories ----------------------------------------------
+
+/** Community-only build: just a note. */
+
+export const AdminCommunityOnly = adminStory({
+  overrides: { fullGristAvailable: false },
+});
+
+/**
+ * Full Grist build, server currently running Community. Shows the upgrade
+ * well and the "Switch to full Grist" button; the legacy
+ * ToggleEnterpriseWidget is hidden to avoid duplicating its "Enable Full
+ * Grist" button.
+ */
+export const AdminServerCommunity = adminStory({
+  deploymentType: "core",
+  overrides: { fullGristAvailable: true, initialServerEdition: COMMUNITY_EDITION },
+});
+
+// --- Status-pill stories ----------------------------------------------------
+
+export const StatusCommunity = statusStory({
+  overrides: { fullGristAvailable: false },
+});
+
+export const StatusForcedFull = statusStory({
+  deploymentType: "enterprise",
+  overrides: { fullGristAvailable: true, editionForced: true, initialServerEdition: FULL_EDITION },
+});
+
+export const StatusForcedCommunity = statusStory({
+  overrides: { fullGristAvailable: true, editionForced: true, initialServerEdition: COMMUNITY_EDITION },
+});
+
+export const StatusFull = statusStory({
+  deploymentType: "enterprise",
+  overrides: { fullGristAvailable: true, initialServerEdition: FULL_EDITION },
+});
+
+// --- Wizard-mode stories ----------------------------------------------------
+
+export const WizardCommunityOnly = wizardStory({ fullGristAvailable: false });
+
+export const WizardFullAndCommunity = wizardStory({ fullGristAvailable: true });
+
+const cssFrame = styled("div", `
+  padding: 24px;
+  max-width: 520px;
+`);

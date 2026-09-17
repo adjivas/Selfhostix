@@ -1,0 +1,48 @@
+.modal__move {
+  &__header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--c--globals--spacings--sm);
+  }
+
+  &__title {
+    font-size: var(--c--globals--font--sizes--h6);
+    font-weight: 700;
+    color: var(--c--contextuals--content--semantic--neutral--primary);
+  }
+
+  &__description {
+    font-size: var(--c--components--modal--content-font-size);
+    color: var(--c--contextuals--content--semantic--neutral--secondary);
+    font-weight: 400;
+  }
+
+  &__explorer {
+    .embedded-explorer__container {
+      padding-left: var(--c--globals--spacings--md);
+      padding-right: var(--c--globals--spacings--md);
+      overflow-y: auto;
+    }
+  }
+}
+
+.add-folder-icon {
+  color: var(--c--contextuals--content--semantic--brand--tertiary);
+}
+
+.c__modal:has(.modal__move__explorer) {
+  // This prevents the bottom border radius to be cut by the footer.
+  overflow: hidden;
+
+  .c__modal__title {
+    padding: var(--c--globals--spacings--md) var(--c--globals--spacings--md)
+      var(--c--globals--spacings--sm) var(--c--globals--spacings--md);
+  }
+
+  .c__modal__footer {
+    margin-top: var(--c--globals--spacings--base);
+    padding-bottom: var(--c--globals--spacings--base);
+    padding-left: var(--c--globals--spacings--md);
+    padding-right: var(--c--globals--spacings--md);
+  }
+}

@@ -1,0 +1,123 @@
+"""Utils for WOPI"""
+
+import re
+from urllib.parse import urlencode, urlparse
+
+from django.conf import settings
+from django.core.cache import cache
+
+from core import models
+from wopi.tasks.configure_wopi import (
+    WOPI_CONFIGURATION_CACHE_KEY,
+    WOPI_DEFAULT_CONFIGURATION,
+)
+
+LAUNCH_URL_PLACEHOLDER_REGEX = r"(<(?P<name>[a-z]+)=(?P<placeholder>[a-zA-Z0-9_]+)&?>)"
+
+
+def is_item_wopi_supported(item, user):
+    """
+    Check if an item is supported by WOPI.
+    """
+    return bool(get_wopi_client_config(item, user))
+
+
+def get_wopi_client_config(item, user):
+    """
+    Get the WOPI client configuration for an item.
+    """
+    if (
+        item.type != models.ItemTypeChoices.FILE
+        or item.upload_state == models.ItemUploadStateChoices.SUSPICIOUS
+        or (item.creator != user and item.upload_state != models.ItemUploadStateChoices.READY)
+    ):
+        return None
+
+    wopi_configuration = get_wopi_configuration()
+
+    if not wopi_configuration:
+        return None
+
+    result = None
+    # Extension must always be checked first. Filenames preserve case (REPORT.DOC),
+    # while the discovery stores extensions in lowercase, so normalize the lookup.
+    extension = item.extension.lower() if item.extension else None
+    if extension and extension in wopi_configuration["extensions"]:
+        result = wopi_configuration["extensions"][extension]
+    elif item.mimetype in wopi_configuration["mimetypes"]:
+        result = wopi_configuration["mimetypes"][item.mimetype]
+
+    return result
+
+
+def get_wopi_client_proof_keys(item, user):
+    """get the wopi proof keys for an item"""
+    wopi_client_config = get_wopi_client_config(item, user)
+
+    if not wopi_client_config:
+        return None
+
+    wopi_configuration = get_wopi_configuration()
+
+    return wopi_configuration[wopi_client_config["client"]]["proof_keys"]
+
+
+def get_wopi_configuration():
+    """get the wopi configuration"""
+    return cache.get(WOPI_CONFIGURATION_CACHE_KEY, default=WOPI_DEFAULT_CONFIGURATION)
+
+
+def compute_wopi_launch_url(launch_url, get_file_info_path, lang=None):
+    """
+    Compute the WOPI launch URL for an item.
+    """
+    launch_url = launch_url.rstrip("?")
+    launch_url = launch_url.rstrip("&")
+
+    wopi_src_base_url = settings.WOPI_SRC_BASE_URL
+    wopi_src = get_file_info_path
+    if wopi_src_base_url:
+        wopi_src = f"{wopi_src_base_url}{get_file_info_path}"
+
+    query_params = {
+        "WOPISrc": wopi_src,
+        "closebutton": "false",  # Collabora specific
+    }
+
+    if lang:
+        query_params["lang"] = lang
+
+    # List of placeholders available here
+    # https://learn.microsoft.com/en-us/microsoft-365/cloud-storage-partner-program/online/discovery#placeholder-values
+    placeholders = {
+        "UI_LLCC": lang,
+        "DC_LLCC": lang,
+        "DISABLE_CHAT": settings.WOPI_DISABLE_CHAT,
+    }
+
+    parsed_launch_url = urlparse(launch_url)
+
+    matches = re.finditer(LAUNCH_URL_PLACEHOLDER_REGEX, launch_url)
+
+    for match in matches:
+        if (
+            match.group("placeholder") in placeholders
+            and placeholders[match.group("placeholder")] is not None
+        ):
+            query_params[match.group("name")] = placeholders[match.group("placeholder")]
+
+    return parsed_launch_url._replace(query=urlencode(query_params)).geturl()
+
+
+def get_wopi_item_version(head_object):
+    """Build a stable WOPI item version token from storage metadata."""
+
+    if etag := head_object.get("ETag"):
+        return etag.strip('"')
+
+    if last_modified := head_object.get("LastModified"):
+        if hasattr(last_modified, "isoformat"):
+            return last_modified.isoformat()
+        return str(last_modified)
+
+    return str(head_object.get("ContentLength", "0"))

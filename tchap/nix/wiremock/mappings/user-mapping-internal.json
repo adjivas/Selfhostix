@@ -1,0 +1,28 @@
+{
+  "name": "User Standard Mapping",
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/_matrix/identity/api/v1/internal-info",
+    "queryParameters": {
+      "medium": {
+        "equalTo": "email"
+      },
+      "address": {
+        "matches" : ".*(numerique\\.gouv\\.fr|tchapgouv\\.com|beta\\.gouv\\.fr|tchap\\.incubateur\\.net)$"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "jsonBody": {
+      "hs": "tchapgouv.com",
+      "requires_invite": false,
+      "invited": false
+    },
+    "headers": {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*"
+    }
+  },
+  "priority": 100
+}

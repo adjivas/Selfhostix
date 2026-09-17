@@ -1,0 +1,27 @@
+import path from "path";
+
+export default {
+  target: "web",
+  mode: "production",
+  entry: "./app/client/browserCheck",
+  output: {
+    path: path.resolve("./static"),
+    filename: "browser-check.js"
+  },
+  resolve: {
+    extensions: [".ts", ".js"],
+  },
+  module: {
+    rules: [
+      {
+        test: /\.(js|ts)?$/,
+        loader: "esbuild-loader",
+        options: {
+          target: "es2020",
+          sourcemap: true,
+        },
+        exclude: /node_modules/
+      },
+    ]
+  }
+};

@@ -1,0 +1,16 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Seekbar > renders the clock 1`] = `
+<div>
+  <input
+    aria-label="Audio seek bar"
+    class="SeekBar-module_seekBar"
+    max="100"
+    min="0"
+    step="1"
+    style="--fillTo: 0.5;"
+    type="range"
+    value="50"
+  />
+</div>
+`;

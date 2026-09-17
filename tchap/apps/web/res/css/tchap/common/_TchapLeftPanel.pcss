@@ -1,0 +1,30 @@
+.tchap-gaufre-fill {
+    fill: var(--cpd-color-bg-action-primary-rest);
+    color: var(--cpd-color-bg-action-primary-rest);
+}
+
+#tchap-gaufre {
+    overflow: scroll;
+    height: 300px;
+    display: flex;
+    flex-direction: column;
+    margin: 10px;
+
+    .mx_AccessibleButton {
+        display: flex;
+        align-items: center;
+        padding-bottom: 20px;
+
+        span {
+            margin-left: 13px;
+            
+        }
+    }
+}
+
+.tc_sidebar_quick_faq {
+    
+    &::before {
+        mask-image: url("@vector-im/compound-design-tokens/icons/help-solid.svg") !important;
+    }
+}

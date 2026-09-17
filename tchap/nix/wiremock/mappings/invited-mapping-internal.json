@@ -1,0 +1,28 @@
+{
+  "name": "Invited User Mapping",
+  "request": {
+    "method": "GET",
+    "urlPathPattern": "/_matrix/identity/api/v1/internal-info",
+    "queryParameters": {
+      "medium": {
+        "equalTo": "email"
+      },
+      "address": {
+        "contains": "@invited.externe.com"
+      }
+    }
+  },
+  "response": {
+    "status": 200,
+    "jsonBody": {
+      "hs": "tchapgouv.com",
+      "requires_invite": true,
+      "invited": true
+    },
+    "headers": {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": "*"
+    }
+  },
+  "priority": 100
+}

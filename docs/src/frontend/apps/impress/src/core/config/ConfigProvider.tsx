@@ -1,0 +1,146 @@
+import { Loader } from '@gouvfr-lasuite/ui-components';
+import Head from 'next/head';
+import Script from 'next/script';
+import { PropsWithChildren, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+
+import { Box } from '@/components';
+import { useCunninghamTheme } from '@/cunningham';
+import { useAuthQuery } from '@/features/auth';
+import {
+  useCustomTranslations,
+  useSynchronizedLanguage,
+} from '@/features/language';
+import { useAnalytics } from '@/libs';
+import { useSentryStore } from '@/stores/useSentryStore';
+
+import { useConfig } from './api/useConfig';
+
+export const ConfigProvider = ({ children }: PropsWithChildren) => {
+  const { data: conf } = useConfig();
+  const { data: user } = useAuthQuery();
+  const { setSentry } = useSentryStore();
+  const { setTheme } = useCunninghamTheme();
+  const { changeLanguageSynchronized } = useSynchronizedLanguage();
+  const { customizeTranslations } = useCustomTranslations();
+  const { AnalyticsProvider } = useAnalytics();
+  const { i18n } = useTranslation();
+  const languageSynchronized = useRef(false);
+  const favicon = conf?.theme_customization?.favicon;
+
+  useEffect(() => {
+    if (!user || languageSynchronized.current) {
+      return;
+    }
+
+    const targetLanguage =
+      user?.language ?? i18n.resolvedLanguage ?? i18n.language;
+
+    void changeLanguageSynchronized(targetLanguage, user).then(() => {
+      languageSynchronized.current = true;
+    });
+  }, [user, i18n.resolvedLanguage, i18n.language, changeLanguageSynchronized]);
+
+  useEffect(() => {
+    if (!conf?.theme_customization?.translations) {
+      return;
+    }
+
+    customizeTranslations(conf.theme_customization.translations);
+  }, [conf?.theme_customization?.translations, customizeTranslations]);
+
+  useEffect(() => {
+    if (!conf?.SENTRY_DSN) {
+      return;
+    }
+
+    setSentry(conf.SENTRY_DSN, conf.ENVIRONMENT);
+  }, [conf?.SENTRY_DSN, conf?.ENVIRONMENT, setSentry]);
+
+  useEffect(() => {
+    if (!conf?.FRONTEND_THEME) {
+      return;
+    }
+
+    setTheme(conf.FRONTEND_THEME);
+  }, [conf?.FRONTEND_THEME, setTheme]);
+
+  useEffect(() => {
+    if (!conf?.POSTHOG_KEY || !conf?.POSTHOG_HOST) {
+      return;
+    }
+
+    const key = conf.POSTHOG_KEY;
+    const host = conf.POSTHOG_HOST;
+    void import('@/services').then(({ PostHogAnalytic }) => {
+      new PostHogAnalytic({ key, host });
+    });
+  }, [conf?.POSTHOG_KEY, conf?.POSTHOG_HOST]);
+
+  useEffect(() => {
+    const frontendVersion = process.env.NEXT_PUBLIC_APP_VERSION;
+
+    if (
+      !conf?.RELEASE_VERSION ||
+      !frontendVersion ||
+      conf.RELEASE_VERSION === frontendVersion
+    ) {
+      return;
+    }
+
+    // Avoid infinite reload loops: only reload once per backend version
+    const RELOAD_VERSION_KEY = 'reload-version';
+    try {
+      const reloadedForVersion = sessionStorage.getItem(RELOAD_VERSION_KEY);
+      if (reloadedForVersion === conf.RELEASE_VERSION) {
+        return;
+      }
+
+      sessionStorage.setItem(RELOAD_VERSION_KEY, conf.RELEASE_VERSION);
+      window.location.reload();
+    } catch {
+      console.warn('Failed to access sessionStorage for version reload logic');
+    }
+  }, [conf?.RELEASE_VERSION]);
+
+  if (!conf) {
+    return (
+      <Box $height="100vh" $width="100vw" $align="center" $justify="center">
+        <Loader />
+      </Box>
+    );
+  }
+
+  return (
+    <>
+      {conf?.FRONTEND_CSS_URL && (
+        <Head>
+          <link rel="stylesheet" href={conf?.FRONTEND_CSS_URL} />
+        </Head>
+      )}
+      {conf?.FRONTEND_JS_URL && (
+        <Script src={conf?.FRONTEND_JS_URL} strategy="afterInteractive" />
+      )}
+      {favicon?.light.href && (
+        <Head>
+          <link
+            rel="icon"
+            media="(prefers-color-scheme: light)"
+            {...favicon.light}
+          />
+        </Head>
+      )}
+      {favicon?.dark.href && (
+        <Head>
+          <link
+            rel="icon"
+            media="(prefers-color-scheme: dark)"
+            {...favicon.dark}
+          />
+        </Head>
+      )}
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <AnalyticsProvider>{children}</AnalyticsProvider>
+    </>
+  );
+};

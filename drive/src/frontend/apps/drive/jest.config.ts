@@ -1,0 +1,44 @@
+import type { Config } from "jest";
+import { pathsToModuleNameMapper } from "ts-jest";
+import tsconfig from "./tsconfig.json";
+
+const config: Config = {
+  preset: "ts-jest",
+  testEnvironment: "node",
+  roots: ["<rootDir>/src"],
+  testMatch: ["**/__tests__/**/*.test.ts", "**/__tests__/**/*.test.tsx"],
+  moduleNameMapper: {
+    // Handle static assets FIRST (before path aliases)
+    "\\.(css|less|scss|sass|svg|png|jpg|jpeg|gif)$":
+      "<rootDir>/__mocks__/fileMock.js",
+    "^pretty-bytes$": "<rootDir>/__mocks__/pretty-bytes.js",
+    "^saxen$": "<rootDir>/__mocks__/saxen.js",
+    // Then handle path aliases
+    ...pathsToModuleNameMapper(tsconfig.compilerOptions.paths || {}, {
+      prefix: "<rootDir>/",
+    }),
+  },
+  transform: {
+    "^.+\\.(ts|tsx)$": [
+      "ts-jest",
+      {
+        tsconfig: {
+          jsx: "react-jsx",
+          // "bundler" (matching the app tsconfig) honors package.json "exports"
+          // subpaths such as "@gouvfr-lasuite/ui-components/icons"; classic
+          // "node" does not.
+          moduleResolution: "bundler",
+        },
+      },
+    ],
+  },
+  transformIgnorePatterns: ["node_modules/(?!(.*\\.mjs$))"],
+  moduleFileExtensions: ["ts", "tsx", "js", "jsx", "json", "svg"],
+  collectCoverageFrom: [
+    "src/**/*.{ts,tsx}",
+    "!src/**/*.d.ts",
+    "!src/**/__tests__/**",
+  ],
+};
+
+export default config;

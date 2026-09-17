@@ -1,0 +1,26 @@
+.tc-verification-page_header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+
+    .tc-verification-page_header_img {
+        &::before {
+            content: "";
+            position: absolute;
+            right: 42%;
+            top: 17%;
+            width:32px;
+            height:32px;
+            mask-image: url("@vector-im/compound-design-tokens/icons/verified.svg");
+            mask-repeat: no-repeat;
+            mask-position: center;
+            mask-size: contain;
+            background-color: var(--confirmation-color);
+        }
+    }
+
+    p {
+        font-size: medium;
+        text-align: center;
+    }
+}

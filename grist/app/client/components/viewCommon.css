@@ -1,0 +1,397 @@
+/*
+  record class is used for grid view header and rows
+ */
+.record {
+  display: -webkit-flex;
+  display: flex;
+  position: relative;
+  box-sizing: border-box;
+  -moz-box-sizing: border-box;
+
+  border-width: 0px;
+  border-style: none;
+  border-color: var(--grist-theme-table-body-border, var(--grist-color-dark-grey));
+  border-left-style: solid;  /* left border, against rownumbers div, always on */
+  border-left-color: var(--grist-theme-table-header-border, lightgray);
+  border-bottom-width: 1px; /* style: none, set by record-hlines*/
+  /* Record background is white (or theme default) by default.
+     It gets overridden by the add row, zebra stripes.
+     It also gets overridden by selecting rows - but in that case background comes from
+     selected fields.
+  */
+  background-color: var(--grist-diff-background-color, /* diffing view */
+                    var(--grist-row-rule-background-color, /* conditional row style */
+                    var(--grist-theme-cell-bg, white))); /* default, not transparent */
+  color: var(--grist-row-color, var(--grist-theme-cell-fg, black));
+}
+
+.record.record-hlines {  /* Overwrites style, width set on element */
+  border-bottom-style: solid;
+}
+
+.record.record-zebra.record-even {
+  background-color: var(--grist-diff-background-color,
+                    var(--grist-row-rule-background-color-zebra,
+                    var(--grist-row-rule-background-color,
+                    var(--grist-theme-cell-zebra-bg, #f8f8f8))));
+}
+
+.record.record-add {
+  background-color: var(--grist-theme-table-add-new-bg, #f6f6ff) !important;  /* important to win over every thing */
+}
+
+.field {
+  position: relative;
+  height: 100%;
+  -webkit-flex: none;
+  flex: none;
+  min-height: 22px;
+  white-space: pre;
+  /* make border exist always so content doesn't shift on v-gridline toggle */
+  border: 0px solid transparent;  /* width set by js, border exists but is transparent */
+/**
+* Order of precedence for field is as follows: diff color, column rule, row rule, static (default) style, transparent.
+* We can't use background inheritance, because row background color is more important then static (aka default)
+* column color defined on a field (so lower in the dom).
+*/
+  --field-background-color: var(--grist-diff-background-color,
+                            var(--grist-column-rule-background-color,
+                            var(--grist-row-rule-background-color,
+                            var(--grist-cell-background-color))));
+  background-color: var(--field-background-color, unset);
+}
+
+/* The vertical line indicating where a column will be inserted when the
+ * Add Column menu is open. */
+.field.field-insert-before::before {
+  content: '';
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  /* Overlap the top/bottom table borders so that the line appears uninterrupted. */
+  bottom: -1px;
+  z-index: var(--grist-insert-column-line-z-index);
+  width: 3px;
+  background-color: var(--grist-theme-widget-active-border, #16B378);
+}
+
+/** Similar order is for detail view, but there is no row rules */
+.g_record_detail_value {
+  background-color: var(--grist-diff-background-color,
+                    var(--grist-column-rule-background-color,
+                    var(--grist-cell-background-color, unset)));
+}
+
+.record.record-zebra.record-even .field {
+  --field-background-color: var(--grist-diff-background-color,
+                            var(--grist-column-rule-background-color,
+                            var(--grist-row-rule-background-color-zebra,
+                            var(--grist-row-rule-background-color,
+                            var(--grist-cell-background-color)))));
+}
+
+.record.record-add .field {
+  background-color: unset !important;  /* important to win over zebra stripes */
+}
+
+.record-vlines > .field {
+  /* set border visibility */
+  border-right-color: var(--grist-theme-table-body-border, var(--grist-color-dark-grey));
+}
+
+.field.scissors {
+  outline: 2px dashed var(--grist-theme-cursor, var(--grist-color-cursor));
+}
+
+.field.draft {
+  padding-right: 18px;
+}
+
+.field_clip {
+  padding: 3px 3px 0px 3px;
+  font-family: var(--grist-font-family-data);
+  line-height: 18px;
+  min-height: 21px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  height: 100%;
+  /* We need to repeat background color here, as it might also be applied on a widget level (through DiffBox.ts)*/
+  background-color: var(--grist-diff-background-color, inherit);
+  --grist-actual-cell-color: var(--grist-diff-color,
+                             var(--grist-rule-color,
+                             var(--grist-row-color,
+                             var(--grist-cell-color))));
+  color: var(--grist-actual-cell-color, unset);
+}
+
+/**
+ * Implement row-height modes.
+ * Note: the height calculation here is manual, based on "line-height: 18px" + padding in viewCommon.css.
+ * The -webkit-* settings allow cells to show an overflow ellipsis. See https://css-tricks.com/line-clampin/.
+ */
+.row_height_set .field_clip {
+  max-height: calc(3px + var(--row-height-lines) * 18px);
+
+  display: -webkit-box;
+  -webkit-line-clamp: var(--row-height-lines);
+  -webkit-box-orient: vertical;
+
+  /* Same as .text_wrapping; consider wrapping to be on with .row_height_set. */
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+/**
+ * Markdown cells render block-level content with lines that aren't a uniform
+ * height, making them incompatible with the -webkit-box/-webkit-line-clamp
+ * approach above.
+ */
+.row_height_set .field_clip.markdown {
+  display: block;
+  position: relative;
+}
+
+/**
+ * The "overflowing" class, set in markdownOverflow.ts, marks a Markdown cell
+ * that a max row height is cutting off.
+ *
+ * The fade is what makes the ellipsis legible: it can't be given the cell's
+ * background, which may be a conditional style, a diff color, or nothing at
+ * all, so instead it dims whatever text it lands on. Drawing it in the cell's
+ * own text color keeps it working over any of those backgrounds. It is a
+ * ::before so that the ellipsis, being a ::after, paints on top of it.
+ *
+ * The mask is anchored in px, not a percentage, so that the cue keeps the same
+ * size next to the ellipsis instead of stretching with the column.
+ */
+.row_height_set .field_clip.markdown.overflowing::before {
+  content: '';
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 8px;
+  background: linear-gradient(to top, var(--grist-actual-cell-color, currentColor), transparent);
+  -webkit-mask-image: linear-gradient(to right, transparent calc(100% - 40px), rgb(0, 0, 0) 100%);
+  mask-image: linear-gradient(to right, transparent calc(100% - 40px), rgb(0, 0, 0) 100%);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.row_height_set .field_clip.markdown.overflowing::after {
+  content: '…';
+  position: absolute;
+  right: 3px;
+  bottom: 0;
+  /* Matches .field_clip's line-height, so it lands on a normal line's baseline. */
+  line-height: 18px;
+  color: var(--grist-actual-cell-color, currentColor);
+  pointer-events: none;
+  /* Safari needs the prefix here, or the ellipsis ends up in copied text. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.row_height_uniform .field_clip {
+  min-height: calc(3px + var(--row-height-lines) * 18px);
+}
+
+
+.gridview_row .field.selected > .selection {
+  background-color: var(--grist-theme-selection, var(--grist-color-selection));
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.field.transform_field > .selection {
+  background-color: var(--grist-theme-selection-darker, rgba(22,179,120,0.25));
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.field_clip.invalid, .field_clip.field-error-from-style {
+  background-color: #ffb6c1;
+  color: black;
+}
+
+.field_clip.invalid:empty {
+  background-color: unset;
+}
+
+.field.transform_field > .field_clip.invalid + .selection {
+  background-color: unset;
+}
+
+.field_clip.field-error-P {
+  color: #B0B0B0;
+  background-color: unset;
+}
+
+.field_clip.invalid.field-error-C {
+  background-color: unset;
+  color: var(--grist-color-dark-grey);
+  padding-left: 18px;
+}
+
+.field_clip.invalid.field-error-C::before {
+  /* based on standard icon styles */
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background-color: var(--grist-color-dark-grey);
+  -webkit-mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-image: var(--icon-Lock);
+}
+
+.field_clip.field-error-U {
+  color: #6363a2;
+  background-color: unset;
+}
+
+.field_clip.field-error-S {
+  color: #aaa;
+  background-color: unset;
+}
+
+/* Insert a zero-width space into each cell, to size cells to at least one line of text. */
+.field_clip:empty::before { content: '\200B'; }
+
+@media not print {
+.selected_cursor {
+  position: absolute;
+  left: 0px;
+  top: 0px;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.active_cursor {
+  /* one pixel outline around the cell, and one inside the cell */
+  outline: 1px solid var(--grist-theme-cursor, var(--grist-color-cursor));
+  box-shadow: inset 0 0 0 1px var(--grist-theme-cursor, var(--grist-color-cursor));
+  z-index: 1;
+}
+}
+
+.column_name {
+  color: var(--grist-header-color,
+         var(--grist-theme-table-header-fg), unset);
+  background-color: var(--grist-header-background-color,
+                    var(--grist-theme-table-header-bg,
+                    var(--grist-color-light-grey)));
+  text-align: center;
+  cursor: pointer;
+  /* Column headers always show vertical gridlines, to make it clear how to resize them */
+  border-right-color: var(--grist-theme-table-header-border, lightgray);
+}
+
+.column_names.record {
+  border-left-color: var(--grist-theme-table-header-border, lightgray);
+}
+
+.column_name.selected > .selection {
+  background-color: var(--grist-theme-selection-header);
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.gridview_data_row_num.selected {
+  color: var(--grist-theme-table-header-selected-fg, unset);
+  background-color: var(--grist-theme-table-header-selected-bg, var(--grist-color-medium-grey-opaque));
+}
+
+.link_selector_row > .gridview_data_row_num {
+  color: var(--grist-theme-left-panel-active-page-fg, white);
+  background-color: var(--grist-theme-left-panel-active-page-bg, var(--grist-color-dark-bg));
+}
+
+@media not print {
+  .link_selector_row > .record::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-color: var(--grist-theme-selection, var(--grist-color-selection));
+    /* z-index should be higher than '.record .field.frozen' (10) to show for frozen columns,
+     * but lower than '.gridview_stick-top' (20) to stay under column headers. */
+    z-index: 15;
+  }
+}
+
+.highlight_match_row > .record {
+  background-color: var(--grist-theme-selection-opaque-bg, #e6f4ea);
+}
+
+.gridview_data_row_info.linked_dst::before {
+  position: absolute;
+  content: '\25B8';
+  text-align: left;
+  left: 7px;
+}
+
+.text_wrapping {
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.diff-local, .diff-local-add {
+  background-color: #dfdfff;
+  --grist-diff-background-color: #dfdfff;
+  --grist-diff-color: black;
+}
+
+.diff-parent, .diff-remote-remove {
+  background-color: #ffdfdf;
+  --grist-diff-background-color: #ffdfdf;
+  --grist-diff-color: black;
+  text-decoration: line-through;
+}
+
+.diff-local-remove {
+  background-color: #dfdfdf;
+  --grist-diff-background-color: #dfdfdf;
+  --grist-diff-color: black;
+  text-decoration: line-through;
+}
+
+.diff-remote, .diff-remote-add {
+  background-color: #afffaf;
+  --grist-diff-background-color: #afffaf;
+  --grist-diff-color: black;
+}
+
+.diff-emphasize-local .diff-local,
+.diff-emphasize-local .diff-local-add {
+  background-color: #afffaf;
+  --grist-diff-background-color: #afffaf;
+}
+
+.diff-emphasize-local .diff-remote,
+.diff-emphasize-local .diff-remote-add {
+  background-color: #dfdfff;
+  --grist-diff-background-color: #dfdfff;
+}
+
+.diff-emphasize-local .diff-local-remove {
+  background-color: #ffdfdf;
+  --grist-diff-background-color: #ffdfdf;
+}
+
+.diff-emphasize-local .diff-parent,
+.diff-emphasize-local .diff-remote-remove {
+  background-color: #dfdfdf;
+  --grist-diff-background-color: #dfdfdf;
+}
+
+.diff-common {
+  color: var(--grist-theme-text);
+  --grist-diff-color: var(--grist-theme-text);
+}

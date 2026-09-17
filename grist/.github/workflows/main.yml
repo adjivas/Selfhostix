@@ -1,0 +1,333 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+  # Allows running this workflow manually from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  build_and_test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # it is helpful to know which sets of tests would have succeeded,
+      # even when there is a failure.
+      fail-fast: false
+      matrix:
+        os: ['ubuntu-24.04']
+        python-version: [3.11]
+        node-version: [22.x]
+        tests:
+          - ':lint:python:client:common:smoke:stubs:pyodide:eslint-unit:'
+          - ':server-1-of-2:'
+          - ':server-2-of-2:'
+          - ':gen-server:'
+          # Groups below are kept balanced by first-letter CPU weight, verified
+          # exhaustive by buildtools/check_test_groups.js. The last group is a
+          # catch-all (via negation) so new tests never silently skip CI.
+          - ':nbrowser-^C:'
+          - ':nbrowser-^[FM]:'
+          - ':nbrowser-^[AGIO]:'
+          - ':nbrowser-^[RSTU]:'
+          - ':nbrowser-^[^ACFGIMORSTU]:'
+          - ':projects:'
+        include:
+          - tests: ':python:'
+            node-version: 22.x
+            python-version: '3.13'
+            os: ubuntu-24.04
+          - tests: ':lint:python:client:common:smoke:'
+            node-version: 22.x
+            python-version: '3.10'
+            os: ubuntu-24.04
+          - tests: ':pyodide:macsandbox:'
+            node-version: 22.x
+            python-version: '3.11'
+            os: macos-latest
+          - tests: ':pyodide:'
+            node-version: 22.x
+            python-version: '3.11'
+            os: windows-2022
+          - tests: ':smoke:'
+            edition: full
+            node-version: 22.x
+            python-version: '3.11'
+            os: ubuntu-24.04
+    steps:
+      # Package scripts are written for a POSIX shell.
+      - name: Run package scripts through bash
+        if: contains(matrix.os, 'windows')
+        run: yarn config set script-shell bash
+
+      - uses: actions/checkout@v3
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'yarn'
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+          # skipping system python on windows currently.
+          cache: ${{ !contains(matrix.os, 'windows') && 'pip' || '' }}
+
+      - name: Install Python packages
+        # skipping system python on windows currently.
+        if: "!contains(matrix.os, 'windows')"
+        run: |
+          pip install virtualenv
+          yarn run install:python
+
+      - name: Install Node.js packages
+        run: ${{ matrix.edition == 'full' && 'yarn run set-full-edition' || 'yarn run set-community-edition' }}
+
+      - name: Install gvisor
+        if: contains(matrix.os, 'ubuntu')
+        run: |
+          docker create --name temp-runsc gristlabs/gvisor-unprivileged:buster /bin/true
+          sudo docker cp temp-runsc:/runsc /usr/bin/runsc
+          docker rm temp-runsc
+
+      - name: Run eslint
+        if: contains(matrix.tests, ':lint:')
+        run: yarn run lint:ci
+
+      - name: Make sure bucket is versioned
+        if: contains(matrix.os, 'ubuntu') && contains(matrix.tests, ':server-') || contains(matrix.os, 'ubuntu') && contains(matrix.tests, ':gen-server:')
+        env:
+          AWS_ACCESS_KEY_ID: administrator
+          AWS_SECRET_ACCESS_KEY: administrator
+        run: aws --region us-east-1 --endpoint-url http://localhost:9000 s3api put-bucket-versioning --bucket grist-docs-test --versioning-configuration Status=Enabled
+
+      - name: Build Node.js code
+        run: yarn run build
+
+      - name: Check nbrowser test-group coverage
+        if: contains(matrix.tests, ':lint:')
+        run: node buildtools/check_test_groups.js
+
+      - name: Install Google Chrome and chromedriver
+        if: contains(matrix.tests, ':nbrowser-') || contains(matrix.tests, ':smoke:') || contains(matrix.tests, ':stubs:') || contains(matrix.tests, ':projects:')
+        run: buildtools/install_chrome_for_tests.sh -y
+
+      - name: Run smoke test
+        if: contains(matrix.tests, ':smoke:')
+        run: VERBOSE=1 DEBUG=1 MOCHA_WEBDRIVER_HEADLESS=1 yarn run test:smoke
+
+      - name: Run python tests
+        if: contains(matrix.tests, ':python:')
+        run: yarn run test:python
+
+      - name: Run client tests
+        if: contains(matrix.tests, ':client:')
+        run: yarn run test:client
+
+      - name: Run common tests
+        if: contains(matrix.tests, ':common:')
+        run: yarn run test:common
+
+      - name: Run stubs tests
+        if: contains(matrix.tests, ':stubs:')
+        run: MOCHA_WEBDRIVER_HEADLESS=1 yarn run test:stubs
+
+      - name: Run gen-server tests with sqlite, minio and redis
+        if: contains(matrix.tests, ':gen-server:')
+        run: |
+          yarn run test:gen-server
+        # Anchors should be used once available. Not supported yet as of December 2024.
+        # https://github.com/actions/runner/issues/1182
+        env:
+          MOCHA_WEBDRIVER_HEADLESS: 1
+          TESTS: ${{ matrix.tests }}
+          GRIST_DOCS_MINIO_ACCESS_KEY: administrator
+          GRIST_DOCS_MINIO_SECRET_KEY: administrator
+          TEST_REDIS_URL: "redis://localhost/11"
+          GRIST_DOCS_MINIO_USE_SSL: 0
+          GRIST_DOCS_MINIO_ENDPOINT: localhost
+          GRIST_DOCS_MINIO_PORT: 9000
+          GRIST_DOCS_MINIO_BUCKET: grist-docs-test
+
+      # Force TEMP into a weird form on Windows, to catch canonicalization
+      # that doesn't handle it. This is how non-short directory names get
+      # shortened to DIR~1 and similar. Sigh.
+      - name: Use stressful TEMP for windows
+        if: contains(matrix.os, 'windows') && contains(matrix.tests, ':pyodide:')
+        shell: cmd
+        run: |
+          for %%I in ("%TEMP%") do echo TEMP=%%~sI>> %GITHUB_ENV%
+          for %%I in ("%TEMP%") do echo TMP=%%~sI>> %GITHUB_ENV%
+
+      - name: Run a couple of tests using pyodide
+        if: contains(matrix.tests, ':pyodide:')
+        shell: bash
+        run: |
+          cd sandbox/pyodide
+          make setup
+          cd ../..
+          yarn run test:server -g 'ActiveDoc.useQuerySet|ActiveDocImport parsing|Sandbox|createTmpDir'
+          # No browser tests on windows yet.
+          if [[ "$RUNNER_OS" != "Windows" ]]; then
+            yarn run test:nbrowser -g 'Importer.*should.show.correct.preview'
+          fi
+        env:
+          MOCHA_WEBDRIVER_HEADLESS: 1
+          GRIST_SANDBOX_FLAVOR: pyodide
+
+      - name: Run a couple of tests using macSandboxExec
+        if: contains(matrix.tests, ':macsandbox:')
+        run: |
+          yarn run test:server -g Sandbox
+        env:
+          MOCHA_WEBDRIVER_HEADLESS: 1
+          GRIST_SANDBOX_FLAVOR: macSandboxExec
+
+      - name: Run gen-server tests with postgres, minio and redis
+        if: contains(matrix.tests, ':gen-server:')
+        run: |
+          PGPASSWORD=$TYPEORM_PASSWORD psql -h $TYPEORM_HOST -U $TYPEORM_USERNAME -w $TYPEORM_DATABASE -c "SHOW ALL;" | grep ' jit '
+          yarn run test:gen-server
+        env:
+          MOCHA_WEBDRIVER_HEADLESS: 1
+          TESTS: ${{ matrix.tests }}
+          GRIST_DOCS_MINIO_ACCESS_KEY: administrator
+          GRIST_DOCS_MINIO_SECRET_KEY: administrator
+          TEST_REDIS_URL: "redis://localhost/11"
+          GRIST_DOCS_MINIO_USE_SSL: 0
+          GRIST_DOCS_MINIO_ENDPOINT: localhost
+          GRIST_DOCS_MINIO_PORT: 9000
+          GRIST_DOCS_MINIO_BUCKET: grist-docs-test
+          TYPEORM_TYPE: postgres
+          TYPEORM_HOST: localhost
+          TYPEORM_DATABASE: db_name
+          TYPEORM_USERNAME: db_user
+          TYPEORM_PASSWORD: db_password
+
+      - name: Run server tests with minio and redis
+        if: contains(matrix.tests, ':server-')
+        run: |
+          export TEST_SPLITS=$(echo $TESTS | sed "s/.*:server-\([^:]*\).*/\1/")
+          yarn run test:server
+        env:
+          MOCHA_WEBDRIVER_HEADLESS: 1
+          TESTS: ${{ matrix.tests }}
+          GRIST_DOCS_MINIO_ACCESS_KEY: administrator
+          GRIST_DOCS_MINIO_SECRET_KEY: administrator
+          TEST_REDIS_URL: "redis://localhost/11"
+          GVISOR_FLAGS: "-unprivileged -ignore-cgroups"
+          GVISOR_EXTRA_DIRS: /opt
+          GRIST_DOCS_MINIO_USE_SSL: 0
+          GRIST_DOCS_MINIO_ENDPOINT: localhost
+          GRIST_DOCS_MINIO_PORT: 9000
+          GRIST_DOCS_MINIO_BUCKET: grist-docs-test
+
+      - name: Run main tests without minio and redis
+        if: contains(matrix.tests, ':nbrowser-')
+        run: |
+          mkdir -p $MOCHA_WEBDRIVER_LOGDIR
+          export GREP_TESTS=$(echo $TESTS | sed "s/.*:nbrowser-\([^:]*\).*/\1/")
+          MOCHA_WEBDRIVER_SKIP_CLEANUP=1 MOCHA_WEBDRIVER_HEADLESS=1 yarn run test:nbrowser --parallel --jobs 3
+        env:
+          TESTS: ${{ matrix.tests }}
+          MOCHA_WEBDRIVER_LOGDIR: ${{ runner.temp }}/test-logs/webdriver
+          GVISOR_FLAGS: "-unprivileged -ignore-cgroups"
+          GVISOR_EXTRA_DIRS: /opt
+          TESTDIR: ${{ runner.temp }}/test-logs
+
+      - name: Run projects tests
+        if: contains(matrix.tests, ':projects:')
+        run: |
+          mkdir -p $MOCHA_WEBDRIVER_LOGDIR
+          yarn run test:projects
+        env:
+          MOCHA_WEBDRIVER_LOGDIR: ${{ runner.temp }}/test-logs/webdriver
+          TESTDIR: ${{ runner.temp }}/test-logs
+          MOCHA_WEBDRIVER_HEADLESS: 1
+
+      - name: Run eslint unit tests for custom rules
+        if: contains(matrix.tests, ':eslint-unit:')
+        run: yarn run test:eslint
+
+      - name: Prepare for saving artifact
+        if: failure()
+        shell: bash
+        run: |
+          ARTIFACT_NAME=logs-$(echo $TESTS | sed 's/[^-a-zA-Z0-9]/_/g')
+          echo "Artifact name is '$ARTIFACT_NAME'"
+          echo "ARTIFACT_NAME=$ARTIFACT_NAME" >> $GITHUB_ENV
+          mkdir -p $TESTDIR
+          find $TESTDIR -iname "*.socket" -exec rm {} \;
+        env:
+          TESTS: ${{ matrix.tests }}
+          TESTDIR: ${{ runner.temp }}/test-logs
+
+      - name: Save artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: ${{ runner.temp }}/test-logs  # only exists for webdriver tests
+
+    services:
+      # https://github.com/bitnami/containers/issues/83267
+      minio:
+        image: ${{ matrix.os == 'ubuntu-24.04' && 'bitnamilegacy/minio:2025.4.22' || '' }} 
+        env:
+          MINIO_DEFAULT_BUCKETS: "grist-docs-test:public"
+          MINIO_ROOT_USER: administrator
+          MINIO_ROOT_PASSWORD: administrator
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/ready"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: ${{ matrix.os == 'ubuntu-24.04' && 'redis' || '' }}
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      postgresql:
+        image: ${{ matrix.os == 'ubuntu-24.04' && 'postgres:latest' || '' }}
+        env:
+          POSTGRES_USER: db_user
+          POSTGRES_PASSWORD: db_password
+          POSTGRES_DB: db_name
+          # JIT is enabled by default since Postgres 17 and has a huge negative impact on performance,
+          # making many tests timeout.
+          # https://support.getgrist.com/self-managed/#what-is-a-home-database
+          POSTGRES_INITDB_ARGS: "-c jit=off"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U db_user"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+  candidate:
+    needs: build_and_test
+    if: ${{ success() && github.event_name == 'push' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Fetch new candidate branch
+        uses: actions/checkout@v3
+
+      - name: Update candidate branch
+        uses: ad-m/github-push-action@8407731efefc0d8f72af254c74276b7a90be36e1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          branch: latest_candidate
+          force: true

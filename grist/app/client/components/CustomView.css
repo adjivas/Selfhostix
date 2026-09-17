@@ -1,0 +1,54 @@
+/*
+ * Ensure the custom view section fits within its allocated area even if it needs to scroll inside
+ * of it. This is not an issue when it contains an iframe, but .custom_view_no_mapping element
+ * could be taller, but its intrinsic height should not affect the container.
+ */
+.custom_view_container {
+  overflow: auto;
+  flex-basis: 0px;
+}
+
+.custom_view_content {
+  height: 100%;
+}
+
+iframe.custom_view {
+  border: none;
+  flex: auto;
+}
+
+.custom_view_notification {
+  padding: 15px;
+  margin: 15px;
+}
+
+.custom_view_no_mapping {
+  padding: 15px;
+  margin: 15px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  color: var(--grist-theme-text, var(--grist-color-dark));
+}
+
+.custom_view_no_mapping h1 {
+  max-width: 310px;
+  margin-bottom: 24px;
+  margin-top: 56px;
+
+  font-style: normal;
+  font-weight: 600;
+  font-size: 22px;
+  line-height: 26px;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.custom_view_no_mapping p {
+  max-width: 310px;
+  font-style: normal;
+  font-weight: 400;
+  font-size: 13px;
+  line-height: 16px;
+  text-align: center;
+}

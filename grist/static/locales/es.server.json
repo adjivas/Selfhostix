@@ -1,0 +1,23 @@
+{
+    "oidc": {
+        "emailNotVerifiedError": "Por favor, compruebe su correo electrónico con el proveedor de identidad y vuelva a iniciar sesión."
+    },
+    "sendAppPage": {
+        "og-description": "Una hoja de cálculo moderna y de código abierto que va más allá de la cuadrícula",
+        "Loading...": "Cargando...",
+        "og-title": "Grist, la evolución de las hojas de cálculo"
+    },
+    "access": {
+        "docNoAccess": "No tiene acceso a este documento.",
+        "docDisabled": "Este documento está desactivado."
+    },
+    "DocApi": {
+        "UntitledDocument": "Documento sin título"
+    },
+    "admin": {
+        "emptyOrg": "No se han encontrado propietarios en la organización administrativa definida por `GRIST_INSTALL_ADMIN_ORG={{org}}`",
+        "orgUser": "El usuario es propietario de la organización administrativa definida por `GRIST_INSTALL_ADMIN_ORG={{org}}`",
+        "noAdminEmail": "Falta la cuenta de administrador porque `GRIST_ADMIN_EMAIL` y `GRIST_DEFAULT_EMAIL` no están establecidos",
+        "accountByEmail": "Cuenta de administrador definida por `GRIST_DEFAULT_EMAIL={{defaultEmail}}`"
+    }
+}

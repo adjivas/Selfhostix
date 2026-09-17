@@ -1,0 +1,26 @@
+{
+    "compilerOptions": {
+        "allowImportingTsExtensions": true,
+        "experimentalDecorators": false,
+        "emitDecoratorMetadata": false,
+        "resolveJsonModule": true,
+        "esModuleInterop": true,
+        "useDefineForClassFields": true,
+        "module": "es2022",
+        "moduleResolution": "bundler",
+        "target": "es2022",
+        "noUnusedLocals": true,
+        "sourceMap": false,
+        "declaration": true,
+        "jsx": "react",
+        "lib": ["es2022", "es2024.promise", "dom", "dom.iterable"],
+        "types": ["storybook-addon-vis/matcher"],
+        "strict": true,
+        "paths": {
+            "@test-utils": ["./src/test/utils/index"],
+            "@vector-im/compound-web": ["./node_modules/compound-web-tchap"]
+        }
+    },
+    "include": ["./src/**/*.ts", "./src/**/*.tsx", ".storybook/*.ts", ".storybook/*.tsx"],
+    "references": [{ "path": "./tsconfig.node.json" }]
+}

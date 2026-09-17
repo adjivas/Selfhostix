@@ -1,0 +1,68 @@
+import { Command } from 'cmdk';
+import { PropsWithChildren, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+
+import SearchSVG from '@/assets/icons/ui-kit/zoom-rounded.svg';
+import { HorizontalSeparator } from '@/components';
+import { useCunninghamTheme } from '@/cunningham';
+
+import { Box } from '../Box';
+
+type QuickSearchInputProps = {
+  inputValue?: string;
+  onFilter?: (str: string) => void;
+  placeholder?: string;
+  withSeparator?: boolean;
+  listId?: string;
+};
+export const QuickSearchInput = ({
+  inputValue,
+  onFilter,
+  placeholder,
+  children,
+  withSeparator: separator = true,
+  listId,
+}: PropsWithChildren<QuickSearchInputProps>) => {
+  const { t } = useTranslation();
+  const { spacingsTokens } = useCunninghamTheme();
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  if (children) {
+    return (
+      <>
+        {children}
+        {separator && <HorizontalSeparator />}
+      </>
+    );
+  }
+
+  return (
+    <>
+      <Box
+        $direction="row"
+        $align="center"
+        className="quick-search-input"
+        $gap={spacingsTokens['xxs']}
+        $padding={{ horizontal: 'base', vertical: 'xs' }}
+      >
+        <SearchSVG
+          aria-hidden="true"
+          width={24}
+          height={24}
+          color="var(--c--contextuals--content--semantic--neutral--secondary)"
+        />
+        <Command.Input
+          ref={inputRef}
+          autoFocus={true}
+          aria-controls={listId}
+          value={inputValue}
+          placeholder={placeholder ?? t('Search')}
+          onValueChange={onFilter}
+          maxLength={254}
+          data-testid="quick-search-input"
+        />
+      </Box>
+      {separator && <HorizontalSeparator $margin={{ top: '2xs' }} />}
+    </>
+  );
+};

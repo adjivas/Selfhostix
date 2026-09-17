@@ -1,0 +1,89 @@
+{
+    "default_server_config": {
+        "m.homeserver": {
+            "base_url": "https://matrix.i.tchap.gouv.fr",
+            "server_name": "Internes - Preprod"
+        },
+        "m.identity_server": {
+            "base_url": "https://matrix.i.tchap.gouv.fr"
+        }
+    },
+    "homeserver_list": [
+        {
+            "base_url": "https://matrix.i.tchap.gouv.fr",
+            "server_name": "Internes - preprod",
+            "email_examples": "hakim@beta.gouv.fr, alice@interieur.gouv.fr, ..."
+        },
+        {
+            "base_url": "https://matrix.e.tchap.gouv.fr",
+            "server_name": "Externes - preprod",
+            "email_examples": "nina@soprasteria.com, paul@athos.fr, ..."
+        }
+    ],
+    "disable_custom_urls": false,
+    "disable_guests": true,
+    "disable_login_language_selector": false,
+    "disable_3pid_login": false,
+    "force_verification": false,
+    "brand": "Tchap",
+    "integrations_ui_url": "https://scalar.vector.im/",
+    "integrations_rest_url": "https://scalar.vector.im/api",
+    "integrations_widgets_urls": [
+        "https://scalar.vector.im/_matrix/integrations/v1",
+        "https://scalar.vector.im/api",
+        "https://scalar-staging.vector.im/_matrix/integrations/v1",
+        "https://scalar-staging.vector.im/api"
+    ],
+    "default_widget_container_height": 280,
+    "default_country_code": "GB",
+    "show_labs_settings": false,
+    "features": {
+        "feature_thread": true,
+        "feature_video_rooms": false
+    },
+    "default_federate": true,
+    "default_theme": "light",
+    "room_directory": {
+        "servers": ["i.tchap.gouv.fr"]
+    },
+    "enable_presence_by_hs_url": {
+        "https://matrix.i.tchap.gouv.fr": false,
+        "https://matrix.e.tchap.gouv.fr": false
+    },
+    "setting_defaults": {
+        "breadcrumbs": true,
+        "UIFeature.voip": false,
+        "UIFeature.shareSocial": false,
+        "UIFeature.registration": true,
+        "UIFeature.urlPreviews": false,
+        "UIFeature.widgets": false,
+        "UIFeature.shareQrCode": false,
+        "UIFeature.thirdPartyId": true,
+        "UIFeature.identityServer": true,
+        "UIFeature.advancedEncryption": false,
+        "MessageComposerInput.showPollsButton": true,
+        "RoomList.orderAlphabetically": false,
+        "Spaces.allRoomsInHome": true,
+        "custom_themes": [],
+        "hideDisplaynameChanges": true,
+        "hideAvatarChanges": true
+    },
+    "branding": {
+        "authHeaderLogoUrl": "themes/tchap/img/logos/tchap-logo.svg",
+        "authFooterLinks": [
+            { "text": "Gouvernement", "url": "https://www.gouvernement.fr" },
+            { "text": "OpenData", "url": "https://www.data.gouv.fr" },
+            { "text": "DINUM", "url": "https://numerique.gouv.fr" },
+            { "text": "beta.gouv.fr", "url": "https://beta.gouv.fr" },
+            { "text": "CGU", "url": "https://www.tchap.gouv.fr/cgu" },
+            { "text": "FAQ", "url": "https://www.tchap.gouv.fr/faq" }
+        ],
+        "welcome_background_url": "themes/tchap/img/backgrounds/tchap-bg.jpg"
+    },
+    "element_call": {
+        "brand": "Appel de groupe",
+        "use_exclusively": true
+    },
+    "map_style_url": "https://openmaptiles.geo.data.gouv.fr/styles/osm-bright/style.json",
+    "permalink_prefix": "https://www.beta.tchap.gouv.fr"
+}
