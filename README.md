@@ -6,6 +6,8 @@ Each service runs inside a lightweight NixOS MicroVM using [`microvm.nix`](https
 
 The project aims to make self-hosting La Suite services simple, isolated, reproducible and easy to experiment with.
 
+Related upstream work also includes [La Suite Drive #841](https://github.com/suitenumerique/drive/pull/841) and [Grist #2596](https://github.com/gristlabs/grist-core/pull/2596), contributing to improved Nix infrastructure across the ecosystem.
+
 ## Contributors
 
 Special thanks to [@youpaw](https://github.com/youpaw) for the exploratory [`dinum-demo`](https://github.com/youpaw/dinum-demo) project, which provided valuable groundwork for Selfhostix.
